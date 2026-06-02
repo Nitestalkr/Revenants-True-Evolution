@@ -1,0 +1,16 @@
+{
+  "name": "revenants",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "description": "OpenClaw companion evolution plugin for GNW/GRAO monitoring and LibraVDB promotion signals.",
+  "main": "index.mjs",
+  "openclaw": {
+    "extensions": [
+      "./index.mjs"
+    ]
+  },
+  "scripts": {
+    "test": "node ../tests/js/validate-monitor-suite.js && node ../tests/js/validate-context-engine.js && node ../tests/js/validate-companion-mode.js"
+  }
+}

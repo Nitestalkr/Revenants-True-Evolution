@@ -1,0 +1,32 @@
+# dependencies
+node_modules/
+.venv/
+venv/
+
+# runtime state / traces
+data/
+*.jsonl
+logs/
+tmp/
+*.log
+
+# Python cache/test state
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# JS cache/test state
+.npm/
+.nyc_output/
+coverage/
+
+# local env/secrets
+.env
+.env.*
+*.pem
+*.key
+
+# OS/editor
+.DS_Store
+.vscode/
+.idea/

@@ -1,0 +1,53 @@
+{
+  "id": "revenants",
+  "name": "Revenants",
+  "description": "Companion evolution layer for continuous GNW/GRAO trace collection, monitoring, and LibraVDB promotion signals.",
+  "version": "0.1.0",
+  "kind": [
+    "tools"
+  ],
+  "contracts": {
+    "tools": [
+      "revenants_status"
+    ]
+  },
+  "activation": {
+    "onStartup": true
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean"
+      },
+      "dataDir": {
+        "type": "string"
+      },
+      "injectContext": {
+        "type": "boolean"
+      },
+      "registerContextEngine": {
+        "type": "boolean",
+        "description": "Experimental opt-in. Leave false when LibraVDB owns the context engine slot."
+      },
+      "startMonitors": {
+        "type": "boolean"
+      },
+      "promoteToMemory": {
+        "type": "boolean"
+      },
+      "promotionMinImpact": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      },
+      "hooks": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}
