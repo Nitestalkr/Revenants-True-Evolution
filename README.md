@@ -12,6 +12,16 @@ implementation and toward a plugin-first architecture:
   and validation.
 - Cron is treated as source-era scaffolding, not as the target runtime design.
 
+Revenants now treats research ingestion as a separate optional lane:
+
+- `runtime-evolution`: runtime failures, retries, alerts, and recurring
+  operational patterns
+- `research-evolution`: optional external research signals such as new arXiv
+  papers that can become reviewable proposals
+
+Both lanes feed the same human-reviewed proposal path. Neither lane should
+apply changes silently.
+
 ## Current Baseline
 
 This baseline contains the reconciled Machine Spirit plugin/docs lane and the
@@ -24,7 +34,7 @@ review is `main` at `6bbd046`.
 plugin/              OpenClaw plugin source
 plugin/core/         Context/observer/data-store components
 plugin/collectors/   Collection notes and trace collector docs
-plugin/monitors/     Continuous monitors and monitor suite
+plugin/monitors/     Continuous monitors plus optional research-evolution source
 tests/js/            JavaScript validation tests
 docs/                Architecture, integration, handoff, and audit notes
 docs/validation/     Validation plan and results

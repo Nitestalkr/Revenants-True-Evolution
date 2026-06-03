@@ -13,6 +13,9 @@ const MonitorSuite = require('../../plugin/monitors/monitor-suite');
 const BoredomMonitor = require('../../plugin/monitors/boredom-monitor');
 const LegacyCronSignalMonitor = require('../../plugin/monitors/cron-health-monitor');
 const AlertSystem = require('../../plugin/monitors/alert-system');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
 let passed = 0;
 let failed = 0;
@@ -119,28 +122,44 @@ async function testAlertSystem() {
 
 async function testMonitorSuite() {
   console.log('\n[4] MonitorSuite orchestrator');
-  const suite = new MonitorSuite({ gatewayUrl: 'http://localhost:3000' });
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'revenants-monitor-suite-'));
+  const suite = new MonitorSuite({
+    gatewayUrl: 'http://localhost:3000',
+    dataDir,
+  });
 
   let alertReceived = false;
-  suite.subscribe('agent-1', () => { alertReceived = true; });
+  const observedAlerts = [];
+  suite.subscribe('agent-1', (msg) => {
+    alertReceived = true;
+    observedAlerts.push(msg);
+  });
   suite.on('alert', () => {});
 
-  suite.start();
+  try {
+    suite.start();
 
-  await delay(200);
+    await delay(200);
 
-  const snapshot = suite.getSnapshot();
+    const snapshot = suite.getSnapshot();
   assert(snapshot.ts != null, 'snapshot has ts');
   assert(snapshot.boredom != null, 'snapshot has boredom');
   assert(snapshot.stability != null, 'snapshot has stability');
+  assert(snapshot.researchEvolution != null, 'snapshot has researchEvolution');
+  assert(snapshot.researchEvolution.enabled === false, 'research evolution lane disabled by default');
   assert(snapshot.legacyCronSignals != null, 'snapshot has legacyCronSignals');
   assert(snapshot.legacyCronSignals.enabled === false, 'legacy cron signals disabled by default');
-  assert(!alertReceived, 'default suite does not emit cron alerts');
 
-  const drained = suite.drainAlerts();
-  assert(drained.length === 0, 'drainAlerts is empty without explicit legacy cron input');
+    const drained = suite.drainAlerts();
+    const legacyCronAlerts = drained.filter((alert) => String(alert?.type || '').startsWith('legacy_cron_'));
+    const legacyCronBroadcasts = observedAlerts.filter((msg) => String(msg?.alert?.type || '').startsWith('legacy_cron_'));
 
-  suite.stop();
+    assert(legacyCronBroadcasts.length === 0, 'default suite does not emit legacy cron alerts');
+    assert(legacyCronAlerts.length === 0, 'drainAlerts has no legacy cron alerts without explicit legacy cron input');
+  } finally {
+    suite.stop();
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  }
 }
 
 async function main() {

@@ -70,12 +70,17 @@ class DataStore {
   }
 
   acknowledgePromotions(ids = [], meta = {}) {
+    return this.reviewPromotions(ids, meta);
+  }
+
+  reviewPromotions(ids = [], meta = {}, options = {}) {
     const wanted = new Set((ids || []).map((id) => String(id)));
     if (wanted.size === 0) return { acknowledged: [], remaining: this.readPromotions().length };
 
     const promotions = this.readPromotions();
     const acknowledged = [];
     const remaining = [];
+    const retain = options.retain === true;
 
     for (const promotion of promotions) {
       if (wanted.has(String(promotion.id))) {
@@ -85,6 +90,7 @@ class DataStore {
           reviewMeta: meta,
         };
         acknowledged.push(reviewed);
+        if (retain) remaining.push(promotion);
       } else {
         remaining.push(promotion);
       }
@@ -96,7 +102,7 @@ class DataStore {
         this.reviewedPromotionsFile,
         acknowledged.map((entry) => JSON.stringify(entry)).join('\n') + '\n',
       );
-      this.writeJsonl(this.promotionsFile, remaining);
+      if (!retain) this.writeJsonl(this.promotionsFile, remaining);
     }
 
     return {
@@ -160,6 +166,10 @@ class DataStore {
         toolCallsObserved: 0,
         toolFailuresObserved: 0,
         promotionsQueued: 0,
+      },
+      sessionRoutes: {},
+      notifications: {
+        sentPromotions: {},
       },
     };
   }

@@ -16,7 +16,8 @@ Compare plugin outputs against current cron outputs:
 - **Trace collection:** Same types, same metadata, no data loss
 - **Boredom calculation:** Same formula, same triggers, no gaps
 - **Stability monitoring:** Same metrics, same alerts, no delays
-- **ArXiv detection:** Same papers, same timing, no misses
+- **Research-evolution detection:** Optional arXiv lane sees the same papers,
+  timing, and misses when explicitly enabled
 - **Cron health:** Same failures detected, same alerts
 
 ### 2. Token Efficiency
@@ -88,6 +89,14 @@ All criteria must pass before public release:
 - [ ] Data continuity confirmed (no gaps)
 - [ ] Agent payload quality confirmed (lean, effective)
 - [ ] Full system operation validated (no regressions)
+
+## Boundary Notes
+
+- Runtime deployment does not depend on arXiv or research polling.
+- Research evolution is an optional source of proposals, not a core runtime
+  correctness requirement.
+- Any research-derived proposal must follow the same explicit human review path
+  as runtime-derived proposals.
 
 ---
 

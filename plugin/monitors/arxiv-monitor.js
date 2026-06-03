@@ -1,11 +1,12 @@
 'use strict';
 
 /**
- * ArXiv Monitor — real-time paper detection and auto-download
+ * ArXiv Monitor — optional research-evolution paper source
  * Replaces: ArXiv Research Monitor cron (periodic fetch)
  *
- * Polls arXiv RSS/API continuously for new papers matching keywords.
- * Stores matches locally. No model dependency.
+ * Polls arXiv RSS/API for new papers matching keywords and turns them into
+ * reviewable research signals. This is intentionally separate from core
+ * runtime-stability monitoring and should remain opt-in.
  */
 
 const EventEmitter = require('events');
@@ -61,6 +62,8 @@ class ArXivMonitor extends EventEmitter {
 
   getState() {
     return {
+      enabled: true,
+      mode: 'research-evolution-source',
       lastPoll: this._lastPoll,
       matchCount: this._matches.length,
       seenCount: this._seen.size,

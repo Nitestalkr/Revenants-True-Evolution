@@ -53,6 +53,13 @@ Current smoke coverage:
   and queued LibraVDB promotion signals
 - plugin boundary checks for disabled mode, runtime state writes, and redaction
 
+Research evolution note:
+
+- arXiv-backed research evolution is optional and disabled by default
+- runtime deployment readiness must not depend on live arXiv polling
+- research-origin proposals should flow through the same reviewed queue, not a
+  separate auto-apply path
+
 The Python prototype should stay visible, but plugin deployment should be gated
 by the JavaScript/OpenClaw validation lane until the Python prototype owns a
 separate executable CI contract again.
@@ -141,6 +148,7 @@ Recommended runtime signals:
 - queued promotion count
 - reviewed promotion count
 - monitor alert count when monitors are explicitly enabled
+- research-evolution proposal count when the optional research lane is enabled
 - filesystem write failures under the configured plugin data directory
 
 Recommended alerts:

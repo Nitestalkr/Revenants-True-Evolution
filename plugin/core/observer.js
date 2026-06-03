@@ -35,6 +35,7 @@ class RevenantsObserver {
     this.api = null;
     this.logger = ctx.logger || console;
     this.pluginConfig = ctx.pluginConfig || {};
+    this.proposalNotifier = typeof ctx.proposalNotifier === 'function' ? ctx.proposalNotifier : null;
     this.rootDir = resolveRuntimeRoot({ ...this.pluginConfig, dataDir: ctx.rootDir || this.pluginConfig.dataDir });
     this.store = new DataStore(this.rootDir);
     this.suite = null;
@@ -148,6 +149,7 @@ class RevenantsObserver {
     }
 
     this.store.updateState((state) => {
+      trackSessionRoute(state, trace);
       reconcileRuntimeStateFromTrace(state, trace, {
         started: this.started,
         monitorsRunning: Boolean(this.suite),
@@ -157,6 +159,10 @@ class RevenantsObserver {
       updateGraoSignals(state, trace, promotion);
       return state;
     });
+
+    if (promotion) {
+      void this.notifyQueuedPromotion(promotion, trace);
+    }
   }
 
   shouldPromote(trace) {
@@ -191,21 +197,28 @@ class RevenantsObserver {
   reviewQueue(action = 'peek', opts = {}) {
     const limit = Math.max(1, Math.min(Number(opts.limit) || 10, 50));
 
-    if (action === 'ack') {
-      const result = this.store.acknowledgePromotions(opts.ids || [], {
+    if (action === 'ack' || action === 'approve' || action === 'reject' || action === 'defer') {
+      const decision = action === 'ack' ? 'approve' : action;
+      const retain = decision === 'defer';
+      const result = this.store.reviewPromotions(opts.ids || [], {
         reviewer: opts.reviewer || 'agent',
         note: opts.note,
-      });
+        decision,
+      }, { retain });
 
       this.store.updateState((state) => {
         const remainingPromotions = this.store.readPromotions();
         state.grao.activeProposals = refreshActiveProposals(remainingPromotions);
         state.grao.lastProposalAt = remainingPromotions.at(-1)?.timestamp || null;
+        rememberPromotionNotifications(state, result.acknowledged, {
+          decision,
+          reviewer: opts.reviewer || 'agent',
+        });
         return state;
       });
 
       return {
-        action: 'ack',
+        action: decision,
         acknowledgedCount: result.acknowledged.length,
         acknowledgedIds: result.acknowledged.map((promotion) => promotion.id),
         remainingCount: result.remaining,
@@ -224,6 +237,38 @@ class RevenantsObserver {
       recent: recent.map(redactPromotion),
       recentlyReviewed: this.store.readReviewedPromotions(limit).map(redactPromotion),
     };
+  }
+
+  async notifyQueuedPromotion(promotion, trace) {
+    if (this.pluginConfig.notifySessionOnProposal === false) return;
+    if (!this.proposalNotifier) return;
+
+    const state = this.store.readState();
+    if (state?.notifications?.sentPromotions?.[promotion.id]) return;
+
+    const route = resolveNotificationRoute(state, trace);
+    if (!route) return;
+
+    try {
+      await this.proposalNotifier({
+        promotion,
+        trace,
+        route,
+        message: formatProposalNotification(promotion, trace, route),
+      });
+
+      this.store.updateState((nextState) => {
+        ensureNotificationState(nextState).sentPromotions[promotion.id] = {
+          sentAt: new Date().toISOString(),
+          sessionKey: route.sessionKey || trace.sessionKey || null,
+          target: route.target || null,
+          decision: 'pending',
+        };
+        return nextState;
+      });
+    } catch (error) {
+      this.logger?.warn?.(`revenants: proposal notification failed: ${error?.message || error}`);
+    }
   }
 }
 
@@ -272,6 +317,17 @@ function redactMetadata(metadata) {
   return Object.fromEntries(allowed
     .filter((key) => metadata[key] !== undefined)
     .map((key) => [key, metadata[key]]));
+}
+
+function trackSessionRoute(state, trace) {
+  const route = routeFromTrace(trace);
+  if (!route?.sessionKey) return;
+  const routes = ensureSessionRoutes(state);
+  routes[route.sessionKey] = mergeDefined(routes[route.sessionKey] || {}, {
+    ...route,
+    lastSeenAt: trace.timestamp || new Date().toISOString(),
+  });
+  trimMap(routes, 100);
 }
 
 function updateCounters(state, trace, queuedPromotion) {
@@ -406,6 +462,109 @@ function summarizePromotionIntents(promotions) {
   return [...counts.entries()]
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
     .map(([intent, count]) => ({ intent, count }));
+}
+
+function resolveNotificationRoute(state, trace) {
+  const current = routeFromTrace(trace);
+  const sessionKey = trace?.sessionKey;
+  const remembered = sessionKey ? ensureSessionRoutes(state)[sessionKey] : null;
+  const merged = mergeDefined(remembered || {}, current || {});
+  return merged?.target ? merged : null;
+}
+
+function routeFromTrace(trace) {
+  const sessionKey = trace?.sessionKey;
+  const metadata = trace?.metadata || {};
+  const parsed = parseSessionRoute(sessionKey);
+  if (!parsed) return null;
+  return {
+    sessionKey,
+    channel: metadata.channel || parsed.channel,
+    target: parsed.target,
+    accountId: metadata.accountId,
+    threadId: metadata.threadId,
+    replyToId: metadata.messageId,
+    senderId: metadata.senderId,
+  };
+}
+
+function parseSessionRoute(sessionKey) {
+  if (typeof sessionKey !== 'string' || !sessionKey) return null;
+  const parts = sessionKey.split(':');
+  if (parts.length < 5 || parts[0] !== 'agent') return null;
+  const channel = parts[2];
+  const scope = parts[3];
+  const id = parts.slice(4).join(':');
+  if (!channel || !id) return null;
+  if (scope === 'channel') return { channel, target: `channel:${id}` };
+  if (scope === 'user' || scope === 'dm') return { channel, target: `user:${id}` };
+  return null;
+}
+
+function formatProposalNotification(promotion, trace, route) {
+  const lines = [];
+  if (route.senderId && route.channel === 'discord') lines.push(`<@${route.senderId}>`);
+  lines.push(`Revenants proposal queued: \`${promotion.id}\``);
+  lines.push(`Intent: ${promotion.intent}`);
+  lines.push(`Risk: ${impactToRiskLabel(promotion.impactScore)} (${Number(promotion.impactScore || 0).toFixed(2)})`);
+  lines.push(`Why: ${promotion.summary}`);
+  if (trace?.metadata?.toolName) lines.push(`Tool: ${trace.metadata.toolName}`);
+  lines.push('Review in chat with:');
+  lines.push(`- \`revenants approve ${promotion.id}\``);
+  lines.push(`- \`revenants reject ${promotion.id}\``);
+  lines.push('- `revenants queue`');
+  return lines.join('\n');
+}
+
+function impactToRiskLabel(score) {
+  const value = Number(score || 0);
+  if (value >= 0.8) return 'high';
+  if (value >= 0.5) return 'medium';
+  return 'low';
+}
+
+function ensureSessionRoutes(state) {
+  if (!state.sessionRoutes || typeof state.sessionRoutes !== 'object') state.sessionRoutes = {};
+  return state.sessionRoutes;
+}
+
+function ensureNotificationState(state) {
+  if (!state.notifications || typeof state.notifications !== 'object') {
+    state.notifications = { sentPromotions: {} };
+  }
+  if (!state.notifications.sentPromotions || typeof state.notifications.sentPromotions !== 'object') {
+    state.notifications.sentPromotions = {};
+  }
+  return state.notifications;
+}
+
+function rememberPromotionNotifications(state, promotions, meta) {
+  const sent = ensureNotificationState(state).sentPromotions;
+  for (const promotion of promotions || []) {
+    sent[promotion.id] = {
+      ...(sent[promotion.id] || {}),
+      decidedAt: new Date().toISOString(),
+      decision: meta?.decision || 'reviewed',
+      reviewer: meta?.reviewer || null,
+    };
+  }
+  trimMap(sent, 200);
+}
+
+function trimMap(map, maxEntries) {
+  const keys = Object.keys(map || {});
+  if (keys.length <= maxEntries) return;
+  for (const key of keys.slice(0, keys.length - maxEntries)) {
+    delete map[key];
+  }
+}
+
+function mergeDefined(base, patch) {
+  const next = { ...base };
+  for (const [key, value] of Object.entries(patch || {})) {
+    if (value !== undefined) next[key] = value;
+  }
+  return next;
 }
 
 function clamp(value) {

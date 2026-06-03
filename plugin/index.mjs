@@ -1,8 +1,11 @@
 import { createRequire } from 'node:module';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 
 const require = createRequire(import.meta.url);
 const { createRevenantsContextEngine } = require('./core/context-engine.js');
 const { createRevenantsObserver } = require('./core/observer.js');
+const execFileAsync = promisify(execFile);
 
 export default {
   id: 'revenants',
@@ -20,12 +23,14 @@ export default {
       pluginConfig,
       rootDir,
       logger: api.logger,
+      proposalNotifier: createProposalNotifier(api, pluginConfig),
     });
 
     observer.registerHooks(api);
     registerObserverService(api, observer);
     registerStatusTool(api, observer);
     registerReviewQueueTool(api, observer);
+    registerReviewCommand(api, observer);
 
     if (
       pluginConfig.registerContextEngine === true
@@ -170,7 +175,7 @@ function registerReviewQueueTool(api, observer) {
       properties: {
         action: {
           type: 'string',
-          enum: ['peek', 'stats', 'ack'],
+          enum: ['peek', 'stats', 'ack', 'approve', 'reject', 'defer'],
           default: 'peek',
         },
         limit: {
@@ -201,4 +206,109 @@ function registerReviewQueueTool(api, observer) {
       };
     },
   });
+}
+
+function registerReviewCommand(api, observer) {
+  if (typeof api.registerCommand !== 'function') return;
+
+  api.registerCommand({
+    name: 'revenants',
+    description: 'Review queued Revenants evolution proposals from chat.',
+    acceptsArgs: true,
+    requireAuth: true,
+    handler: async (ctx) => {
+      const raw = String(ctx.args || '').trim();
+      const [subcommand = 'help', firstArg, ...rest] = raw.split(/\s+/).filter(Boolean);
+
+      if (subcommand === 'queue' || subcommand === 'status') {
+        const result = observer.reviewQueue('peek', { limit: 5 });
+        return {
+          text: formatQueueSummary(result),
+        };
+      }
+
+      if (subcommand === 'approve' || subcommand === 'reject' || subcommand === 'defer') {
+        if (!firstArg) {
+          return {
+            text: `Missing proposal id. Try \`revenants ${subcommand} <proposal-id>\`.`,
+            isError: true,
+          };
+        }
+
+        const note = rest.join(' ').trim() || undefined;
+        const result = observer.reviewQueue(subcommand, {
+          ids: [firstArg],
+          reviewer: ctx.senderId || ctx.sessionKey || 'chat-reviewer',
+          note,
+        });
+
+        if (result.acknowledgedCount === 0) {
+          return {
+            text: `No queued proposal matched \`${firstArg}\`. Try \`revenants queue\`.`,
+            isError: true,
+          };
+        }
+
+        return {
+          text: `Revenants ${decisionVerb(subcommand)} \`${firstArg}\`. Remaining queued: ${result.remainingCount}.`,
+        };
+      }
+
+      return {
+        text: [
+          'Revenants review commands:',
+          '- `revenants queue`',
+          '- `revenants approve <proposal-id>`',
+          '- `revenants reject <proposal-id>`',
+          '- `revenants defer <proposal-id>`',
+        ].join('\n'),
+      };
+    },
+  });
+}
+
+function decisionVerb(action) {
+  if (action === 'approve') return 'approved';
+  if (action === 'reject') return 'rejected';
+  if (action === 'defer') return 'deferred';
+  return `${action}d`;
+}
+
+function formatQueueSummary(result) {
+  const lines = [`Queued proposals: ${result.queuedCount}`];
+  for (const proposal of (result.recent || []).slice(-5).reverse()) {
+    lines.push(`- ${proposal.id} | ${proposal.intent} | ${proposal.summary}`);
+  }
+  if ((result.recent || []).length === 0) {
+    lines.push('- none');
+  }
+  return lines.join('\n');
+}
+
+function createProposalNotifier(api, pluginConfig) {
+  if (pluginConfig.notifySessionOnProposal === false) return null;
+
+  return async ({ route, message }) => {
+    if (!route?.channel || !route?.target || !message) return;
+    const args = [
+      'message',
+      'send',
+      '--channel',
+      route.channel,
+      '--target',
+      route.target,
+      '--message',
+      message,
+    ];
+
+    if (route.accountId) args.push('--account', String(route.accountId));
+    if (route.threadId !== undefined && route.threadId !== null) args.push('--thread-id', String(route.threadId));
+    if (route.replyToId) args.push('--reply-to', String(route.replyToId));
+
+    await execFileAsync('openclaw', args, {
+      timeout: Number(pluginConfig.proposalNotifyTimeoutMs) || 15000,
+      env: process.env,
+    });
+    api.logger?.info?.(`revenants: notified ${route.channel}:${route.target} about queued proposal.`);
+  };
 }

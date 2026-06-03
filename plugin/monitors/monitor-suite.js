@@ -3,8 +3,9 @@
 /**
  * Monitor Suite — orchestrator for all continuous monitors
  *
- * Wires together: BoredomMonitor, StabilityMonitor, ArXivMonitor,
- * optional LegacyCronSignalMonitor, SystemHealthMonitor, AlertSystem
+ * Wires together: BoredomMonitor, StabilityMonitor, optional ArXivMonitor as
+ * research-evolution source, optional LegacyCronSignalMonitor,
+ * SystemHealthMonitor, AlertSystem
  *
  * Usage:
  *   const suite = new MonitorSuite({ gatewayUrl: 'http://localhost:3000' });
@@ -25,10 +26,18 @@ class MonitorSuite extends EventEmitter {
     super();
     this.opts = opts;
     const shared = opts.dataDir ? { dataDir: opts.dataDir } : {};
+    const researchEvolutionEnabled = opts.researchEvolution?.enabled === true
+      || opts.arxiv?.enabled === true;
 
     this.boredom = new BoredomMonitor({ ...shared, ...(opts.boredom ?? {}) });
     this.stability = new StabilityMonitor({ ...shared, ...(opts.stability ?? {}) });
-    this.arxiv = new ArXivMonitor({ ...shared, ...(opts.arxiv ?? {}) });
+    this.arxiv = researchEvolutionEnabled
+      ? new ArXivMonitor({
+          ...shared,
+          ...(opts.arxiv ?? {}),
+          ...(opts.researchEvolution ?? {}),
+        })
+      : null;
     this.legacyCronSignals = opts.legacyCronSignals?.enabled === true
       ? new LegacyCronSignalMonitor({ ...shared, ...(opts.legacyCronSignals ?? {}) })
       : null;
@@ -49,7 +58,7 @@ class MonitorSuite extends EventEmitter {
 
     this.boredom.start();
     this.stability.start();
-    this.arxiv.start();
+    if (this.arxiv) this.arxiv.start();
     if (this.legacyCronSignals) this.legacyCronSignals.start();
     this.systemHealth.start();
 
@@ -63,7 +72,7 @@ class MonitorSuite extends EventEmitter {
 
     this.boredom.stop();
     this.stability.stop();
-    this.arxiv.stop();
+    if (this.arxiv) this.arxiv.stop();
     if (this.legacyCronSignals) this.legacyCronSignals.stop();
     this.systemHealth.stop();
 
@@ -92,11 +101,19 @@ class MonitorSuite extends EventEmitter {
 
   /** Get aggregated health snapshot — lean, agent-friendly */
   getSnapshot() {
+    const researchEvolution = this.arxiv
+      ? this.arxiv.getState()
+      : {
+          enabled: false,
+          mode: 'research-evolution-source',
+          reason: 'optional research-evolution lane; disabled unless explicitly enabled',
+        };
     return {
       ts: new Date().toISOString(),
       boredom: this.boredom.getState(),
       stability: this.stability.getState(),
-      arxiv: this.arxiv.getState(),
+      researchEvolution,
+      arxiv: researchEvolution,
       legacyCronSignals: this.legacyCronSignals
         ? this.legacyCronSignals.getState()
         : { enabled: false, reason: 'plugin-native runtime; cron is historical reference only' },
@@ -113,7 +130,7 @@ class MonitorSuite extends EventEmitter {
   _wireAlerts() {
     this.alerts.attachMonitor('boredom', this.boredom);
     this.alerts.attachMonitor('stability', this.stability);
-    this.alerts.attachMonitor('arxiv', this.arxiv);
+    if (this.arxiv) this.alerts.attachMonitor('researchEvolution', this.arxiv);
     if (this.legacyCronSignals) this.alerts.attachMonitor('legacyCronSignals', this.legacyCronSignals);
     this.alerts.attachMonitor('systemHealth', this.systemHealth);
 

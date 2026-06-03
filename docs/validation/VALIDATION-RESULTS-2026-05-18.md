@@ -48,7 +48,7 @@
 |------|---------|
 | monitors/boredom-monitor.js | Continuous GNW boredom calculation |
 | monitors/stability-monitor.js | Memory, CPU, drive health, cron status |
-| monitors/arxiv-monitor.js | Real-time arXiv paper detection |
+| monitors/arxiv-monitor.js | Optional research-evolution paper source |
 | monitors/cron-health-monitor.js | Cron execution tracking, failure detection |
 | monitors/system-health-monitor.js | Gateway status, plugin/agent health |
 | monitors/alert-system.js | Alert aggregation and session broadcast |

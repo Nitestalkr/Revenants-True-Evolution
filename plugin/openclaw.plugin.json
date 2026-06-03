@@ -47,6 +47,15 @@
         "type": "boolean",
         "description": "Queue reviewed proposal signals for LibraVDB/agent review; does not directly mutate memory."
       },
+      "notifySessionOnProposal": {
+        "type": "boolean",
+        "description": "When a new proposal is queued, post a compact review prompt back into the active session chat."
+      },
+      "proposalNotifyTimeoutMs": {
+        "type": "integer",
+        "minimum": 1000,
+        "description": "Timeout for sending proposal review prompts back into chat."
+      },
       "proposalMinImpact": {
         "type": "number",
         "minimum": 0,
