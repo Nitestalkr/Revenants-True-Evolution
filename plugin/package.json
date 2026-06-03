@@ -11,6 +11,9 @@
     ]
   },
   "scripts": {
-    "test": "node ../tests/js/validate-monitor-suite.js && node ../tests/js/validate-context-engine.js && node ../tests/js/validate-companion-mode.js && node ../tests/js/validate-plugin-boundaries.js"
+    "test": "node ../tests/js/validate-monitor-suite.js && node ../tests/js/validate-context-engine.js && node ../tests/js/validate-companion-mode.js && node ../tests/js/validate-plugin-boundaries.js",
+    "test:plugin-native": "node ../tests/js/validate-plugin-native-runtime.js",
+    "test:cron-guard": "node ../tests/js/validate-cron-historical-only.js",
+    "ci": "npm test && npm run test:plugin-native && npm run test:cron-guard"
   }
 }
