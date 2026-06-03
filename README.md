@@ -48,3 +48,12 @@ Run the JavaScript validation suite from the plugin directory:
 cd plugin
 npm test
 ```
+
+## Review Surface
+
+The plugin currently exposes two OpenClaw-facing tools:
+
+- `revenants_status` for redacted observer/runtime state, recent traces, and
+  queued promotions
+- `revenants_review_queue` for inspecting queue pressure and acknowledging
+  reviewed promotion signals without giving Revenants direct memory ownership

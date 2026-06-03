@@ -1,9 +1,9 @@
 'use strict';
 
-const path = require('path');
 const DataStore = require('./data-store');
 const MonitorSuite = require('../monitors/monitor-suite');
 const { normalizeMessageTrace, normalizeTurnTrace } = require('./trace-normalizer');
+const { resolveRuntimeRoot } = require('./storage-paths');
 
 function createRevenantsContextEngine(ctx = {}) {
   return new RevenantsContextEngine(ctx);
@@ -12,10 +12,8 @@ function createRevenantsContextEngine(ctx = {}) {
 class RevenantsContextEngine {
   constructor(ctx = {}) {
     this.ctx = ctx;
-    this.rootDir = ctx.pluginConfig?.dataDir
-      ? path.resolve(ctx.pluginConfig.dataDir)
-      : path.resolve(__dirname, '..');
-    this.injectContext = ctx.pluginConfig?.injectContext !== false;
+    this.rootDir = resolveRuntimeRoot(ctx.pluginConfig || {});
+    this.injectContext = ctx.pluginConfig?.injectContext === true;
     this.startMonitors = ctx.pluginConfig?.startMonitors === true;
     this.store = new DataStore(this.rootDir);
     this.suite = null;
@@ -38,7 +36,7 @@ class RevenantsContextEngine {
   async bootstrap() {
     this.store.ensure();
     if (this.startMonitors && !this.suite) {
-      this.suite = new MonitorSuite();
+      this.suite = new MonitorSuite({ dataDir: this.rootDir });
       this.suite.start();
     }
     return { bootstrapped: true };
@@ -159,6 +157,16 @@ function updateGraoSignals(state, trace) {
   if (trace.toolCalls.failed > 0 || trace.toolCalls.leakedAsText > 0) gradients.add('tool-call-reliability');
   if (trace.toolCalls.attempted > 0) gradients.add('trace-density');
   state.grao.activeGradients = [...gradients].slice(-10);
+  if (trace.toolCalls.failed > 0) state.grao.knownFailureCount += trace.toolCalls.failed;
+  state.grao.activeProposals = deriveActiveProposals(state.grao.activeProposals, trace);
+  if (state.grao.activeProposals.length > 0) state.grao.lastProposalAt = trace.timestamp;
+}
+
+function deriveActiveProposals(existing, trace) {
+  const intents = new Set(Array.isArray(existing) ? existing : []);
+  if (trace.toolCalls.failed > 0) intents.add('stabilize-runtime');
+  if (trace.toolCalls.leakedAsText > 0) intents.add('track-tool-reliability');
+  return [...intents].slice(-10);
 }
 
 function estimateTokens(messages, addition = '') {
@@ -179,4 +187,5 @@ module.exports = {
   RevenantsContextEngine,
   createRevenantsContextEngine,
   buildContextBlock,
+  resolveDefaultRootDir: resolveRuntimeRoot,
 };

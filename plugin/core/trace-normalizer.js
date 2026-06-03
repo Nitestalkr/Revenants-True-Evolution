@@ -85,7 +85,7 @@ function buildPromotion(trace) {
     traceId: trace.id,
     signalType: trace.signalType,
     source: 'revenants',
-    target: 'libravdb',
+    target: 'libravdb-review-queue',
     intent: promotionIntent(trace),
     impactScore: trace.impactScore,
     summary: promotionSummary(trace),

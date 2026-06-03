@@ -10,15 +10,16 @@ const fs = require('fs');
 const path = require('path');
 const http = require('http');
 const https = require('https');
+const { resolveDataFile } = require('../core/storage-paths');
 
 const CHECK_INTERVAL_MS = 15000; // 15s
-const DATA_FILE = path.join(__dirname, '..', 'data', 'system-health.json');
 
 class SystemHealthMonitor extends EventEmitter {
   constructor(opts = {}) {
     super();
     this.gatewayUrl = opts.gatewayUrl ?? 'http://localhost:3000';
     this.pluginEndpoints = opts.pluginEndpoints ?? [];
+    this.dataFile = resolveDataFile(opts, 'system-health.json');
     this._timer = null;
     this._status = {
       gateway: 'unknown',
@@ -118,13 +119,13 @@ class SystemHealthMonitor extends EventEmitter {
   }
 
   _ensureDataDir() {
-    const dir = path.dirname(DATA_FILE);
+    const dir = path.dirname(this.dataFile);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   }
 
   _saveState() {
     try {
-      fs.writeFileSync(DATA_FILE, JSON.stringify({
+      fs.writeFileSync(this.dataFile, JSON.stringify({
         status: this._status,
         alerts: this._alerts.slice(-20),
         history: this._history.slice(-6),

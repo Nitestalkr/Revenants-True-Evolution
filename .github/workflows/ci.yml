@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - 'machine-spirit/**'
+      - 'randi/**'
+      - 'randi2/**'
+      - 'claude0/**'
+      - 'cb/**'
+      - 'zero/**'
+
+jobs:
+  plugin-validation:
+    name: Plugin-native validation
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: plugin
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Validate plugin runtime and cron guard
+        run: npm run ci
+
+  python-prototype-collection:
+    name: Python prototype collection
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Check pytest collection
+        run: python -m pytest --collect-only revenant/tests || test $? -eq 5

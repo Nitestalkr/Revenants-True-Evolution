@@ -12,10 +12,9 @@ const EventEmitter = require('events');
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
+const { resolveDataDir, resolveDataFile } = require('../core/storage-paths');
 
 const POLL_INTERVAL_MS = 5 * 60 * 1000; // 5min continuous polling
-const DATA_FILE = path.join(__dirname, '..', 'data', 'arxiv-state.json');
-const PAPERS_DIR = path.join(__dirname, '..', 'data', 'arxiv-papers');
 
 const DEFAULT_KEYWORDS = [
   'global workspace theory',
@@ -35,6 +34,8 @@ class ArXivMonitor extends EventEmitter {
     super();
     this.keywords = opts.keywords ?? DEFAULT_KEYWORDS;
     this.categories = opts.categories ?? DEFAULT_CATEGORIES;
+    this.dataFile = resolveDataFile(opts, 'arxiv-state.json');
+    this.papersDir = path.join(resolveDataDir(opts), 'arxiv-papers');
     this._timer = null;
     this._seen = new Set();
     this._matches = [];
@@ -142,21 +143,21 @@ class ArXivMonitor extends EventEmitter {
   _saveAbstract(paper) {
     try {
       const safe = paper.id.replace(/[^a-zA-Z0-9._-]/g, '_');
-      const file = path.join(PAPERS_DIR, `${safe}.json`);
+      const file = path.join(this.papersDir, `${safe}.json`);
       fs.writeFileSync(file, JSON.stringify(paper, null, 2));
     } catch (_) { /* non-fatal */ }
   }
 
   _ensureDataDir() {
-    for (const dir of [path.dirname(DATA_FILE), PAPERS_DIR]) {
+    for (const dir of [path.dirname(this.dataFile), this.papersDir]) {
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     }
   }
 
   _loadState() {
     try {
-      if (fs.existsSync(DATA_FILE)) {
-        const saved = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+      if (fs.existsSync(this.dataFile)) {
+        const saved = JSON.parse(fs.readFileSync(this.dataFile, 'utf8'));
         this._seen = new Set(saved.seen ?? []);
         this._matches = saved.matches ?? [];
       }
@@ -165,7 +166,7 @@ class ArXivMonitor extends EventEmitter {
 
   _saveState() {
     try {
-      fs.writeFileSync(DATA_FILE, JSON.stringify({
+      fs.writeFileSync(this.dataFile, JSON.stringify({
         seen: [...this._seen].slice(-1000),
         matches: this._matches.slice(-100),
         lastPoll: this._lastPoll,
