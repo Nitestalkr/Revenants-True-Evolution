@@ -10,13 +10,13 @@ implementation and toward a plugin-first architecture:
 - LibraVDB remains the memory/context authority.
 - Agent turns handle reasoning, review, proposals, implementation decisions,
   and validation.
-- Cron becomes optional/light scheduling instead of the core system design.
+- Cron is treated as source-era scaffolding, not as the target runtime design.
 
 ## Current Baseline
 
-This baseline contains Machine Spirit's reconciled plugin-side import plus
-direction-setting docs. Fedora's Python prototype lane is tracked separately for
-review and comparison before the complete baseline is finalized.
+This baseline contains the reconciled Machine Spirit plugin/docs lane and the
+Fedora Python prototype/task lane. The current comparison point for source
+review is `main` at `6bbd046`.
 
 ## Layout
 
@@ -28,7 +28,17 @@ plugin/monitors/     Continuous monitors and monitor suite
 tests/js/            JavaScript validation tests
 docs/                Architecture, integration, handoff, and audit notes
 docs/validation/     Validation plan and results
+revenant/            Python prototype lane
+revenant/tests/      Python validation tests
+tasks/               Imported planning artifacts
 ```
+
+## Source Review
+
+Before wider agent expansion, read `docs/SOURCE_MATERIAL_REVIEW.md`. It records
+what Revenants inherits from Remnant-Research and the Windows-era GNW plugin,
+what it rejects from cron-era scaffolding, and what needs clarification before
+new implementation branches begin.
 
 ## Validation
 

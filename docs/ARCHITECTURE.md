@@ -1,4 +1,4 @@
-# Revenants — Architecture Design
+# Revenants - Architecture Design
 
 ## Problem Statement
 
@@ -9,7 +9,12 @@ Current cron-heavy setup causes:
 - **Model crashes:** Cron interruptions mid-task (this is what we're solving)
 - **Competition:** Multiple cron jobs fighting for the same model processing window
 
-## Solution: Plugin-Driven Architecture
+## Solution: Plugin-Native Architecture
+
+Revenants inherits the GNW/GRAO research loop, but not the cron execution model.
+The target architecture is plugin-native: OpenClaw gateway hooks, monitor events,
+trace normalization, agent-reviewed proposals, and LibraVDB-boundary promotion
+signals. Cron-era materials are provenance and comparison evidence only.
 
 ### Layer 1: Continuous Data Collection (Plugin)
 
@@ -23,11 +28,11 @@ Current cron-heavy setup causes:
 **How:** Agent turns with pre-processed data from plugin
 **Benefit:** Model adds value to analysis, lean payloads (no raw trace parsing)
 
-### Layer 3: Agent Coordination (Plugin Broadcast)
+### Layer 3: Agent Review and Coordination
 
-**What:** Drive weight sync, cluster broadcast, state sharing
-**How:** Plugin broadcasts to agent sessions, agents respond with analysis
-**Benefit:** Deterministic broadcast, no waiting for agent cycles
+**What:** Advisory drive pressure, promotion proposals, handoff summaries
+**How:** Plugin queues distilled signals; agents review, decide, and implement
+**Benefit:** Deterministic evidence flow without autonomous policy mutation
 
 ## Architecture Diagram
 
@@ -36,19 +41,19 @@ Current cron-heavy setup causes:
     │
     ├── Revenants Plugin (continuous)
     │   ├── Trace Collector (real-time)
-    │   ├── Monitor Suite (boredom, stability, ArXiv, cron health)
-    │   ├── State Broadcast (to agent sessions)
+    │   ├── Monitor Suite (boredom, stability, ArXiv, legacy health)
+    │   ├── Promotion Queue (agent-reviewed signals)
     │   └── Data Store (local JSON/SQLite)
     │
     ├── Agent Turns (model-dependent, lean payloads)
     │   ├── GRAO Analysis (gradients, proposals)
-    │   ├── GNW Drive Computation
+    │   ├── GNW Drive Pressure Review
     │   └── Research Analysis
     │
-    └── Cron Jobs (minimal, plugin-driven)
-        ├── Proposal Generator (reads plugin data)
-        ├── Drive Sync (reads plugin data)
-        └── Daily Reports (reads plugin data)
+    └── LibraVDB Boundary
+        ├── Memory/context authority remains LibraVDB
+        ├── Revenants queues distilled promotion signals
+        └── No direct memory or policy mutation
 ```
 
 ## Key Components
@@ -65,23 +70,26 @@ Replaces: GNW cron trace collection, GRAO trace collection
 
 Replaces: Stability Monitor, Boredom Scan, ArXiv Monitor, Cron Health Monitor
 - **Boredom monitor:** Continuous calculation, triggers when threshold hit
-- **Stability monitor:** Memory, CPU, drive health, cron status
+- **Stability monitor:** Memory, CPU, drive health, gateway/runtime status
 - **ArXiv monitor:** Real-time paper detection, auto-download
-- **Cron health monitor:** Tracks cron execution, flags failures
+- **Legacy scheduler health monitor:** Tracks source-era scheduler failures only
+  when needed for migration diagnostics. It is not part of the target loop.
 
-### State Broadcast
+### Promotion Queue and Review
 
-Replaces: GNW Phase 6 sync crons, cluster weight sync
-- Broadcasts drive weights to agent sessions
-- Broadcasts cluster state changes
-- Agents respond with analysis/updates
-- Deterministic, no model dependency
+Replaces: GNW Phase 6 sync crons, cluster weight sync, automatic proposal
+delivery
+- Queues advisory drive pressure and promotion candidates
+- Agents review proposed changes before implementation
+- LibraVDB remains the memory/context authority
+- Deterministic evidence flow, no model dependency for raw collection
 
 ### Data Store
 
-- Local JSON files (consistent with current setup)
-- Structured for easy agent consumption
+- Local runtime files for traces, state, and promotion queues
+- Structured for auditability and agent consumption
 - Pre-processed for lean payloads
+- Excluded from the repository unless Josh explicitly approves a small fixture
 
 ## Migration Path
 
@@ -91,14 +99,14 @@ Replaces: GNW Phase 6 sync crons, cluster weight sync
 - Implement monitoring suite
 - Test against current cron outputs
 
-### Phase 2: Lean Analysis Crons
-- Replace GRAO analysis cron with lean version
-- Replace GNW drive cron with lean version
+### Phase 2: Agent-Reviewed Analysis
+- Replace GRAO analysis cron with plugin-provided trace summaries
+- Replace GNW drive cron with advisory drive-pressure summaries
 - Verify outputs match
 
 ### Phase 3: Integration
 - Deploy plugin as OpenClaw plugin
-- Switch cron jobs to plugin-driven
+- Remove cron dependency from the target Revenants path
 - Validate full system operation
 - Confirm adequacy as replacement
 
@@ -113,8 +121,10 @@ Replaces: GNW Phase 6 sync crons, cluster weight sync
 - **Zero timeout failures** on monitoring
 - **Continuous data** (no periodic gaps)
 - **No model crashes** from cron competition
-- **Output parity** with current cron setup (or better)
+- **Output parity** with current cron-derived theory (or better)
 - **Token reduction** ≥ 60% on routine work
+- **No autonomous memory/policy mutation** outside agent review and LibraVDB
+  boundaries
 
 ---
 

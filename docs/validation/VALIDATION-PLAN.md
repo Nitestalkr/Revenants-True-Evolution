@@ -1,4 +1,8 @@
-# Revenants — Validation Plan
+# Revenants - Validation Plan
+
+This plan came from the cron-to-plugin migration period. Use current
+direction-setting docs first: Revenants is plugin-native, and cron-derived
+artifacts are comparison evidence rather than target runtime components.
 
 ## Goal
 
@@ -58,14 +62,14 @@ Measure lean payload effectiveness:
    - Confirm data parity
    - Confirm timeout elimination
 
-2. **Phase 2:** Build lean analysis crons
+2. **Phase 2:** Build agent-reviewed analysis payloads
    - Compare outputs against current cron
    - Confirm adequacy
    - Confirm token reduction
 
 3. **Phase 3:** Full integration
    - Deploy plugin as OpenClaw plugin
-   - Switch cron jobs to plugin-driven
+   - Remove cron dependency from the target Revenants path
    - Validate full system operation
    - Confirm no regressions
 

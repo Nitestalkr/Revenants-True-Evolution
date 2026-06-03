@@ -6,8 +6,8 @@ agents.
 ## Project Direction
 
 Revenants is moving the cron-derived GNW/GRAO/TPG/self-evolution research into a
-plugin-first observer architecture. Cron should become a light or optional
-triggering mechanism, not the core system design.
+plugin-first observer architecture. Cron is source-era scaffolding and should
+not be treated as part of the target runtime architecture.
 
 Revenants is intended to complement LibraVDB. LibraVDB remains the
 memory/context authority. Revenants observes, collects, normalizes, monitors,
@@ -19,8 +19,13 @@ The canonical collaboration surface is:
 
 `git@github.com:Nitestalkr/Revenants-True-Evolution.git`
 
-Until the first clean baseline is merged, local Fedora and Machine Spirit copies
-are source material only. Neither local copy is canonical by itself.
+The reconciled baseline is `main` at `6bbd046`. Older local Fedora and Machine
+Spirit copies are source material only. Neither local copy is canonical by
+itself.
+
+Before wider agent expansion, read `docs/SOURCE_MATERIAL_REVIEW.md`. That review
+defines which GNW/GRAO ideas carry forward, which cron-era mechanisms are
+rejected, and which boundaries need clarification before implementation work.
 
 ## Agent Lanes
 
@@ -33,6 +38,9 @@ are source material only. Neither local copy is canonical by itself.
 - CB: code quality, maintainability, and performance review.
 - Zero: deployment, monitoring, and runtime validation.
 
+Do not start these implementation/review lanes until Josh signs off on the
+source-material cross-exam.
+
 ## Baseline Rules
 
 - Keep JavaScript/OpenClaw plugin source under `plugin/`.
@@ -44,6 +52,8 @@ are source material only. Neither local copy is canonical by itself.
 - Exclude runtime state, traces, caches, workspace metadata, dependency folders,
   logs, secrets, and local environment files.
 - Add fixtures only under `tests/fixtures/` if Josh explicitly approves them.
+- Treat cron references in imported tasks or validation notes as legacy source
+  evidence unless a current direction-setting doc says otherwise.
 
 ## Handoff Practice
 
