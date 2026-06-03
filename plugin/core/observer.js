@@ -115,17 +115,17 @@ class RevenantsObserver {
 
   recordTrace(trace) {
     this.store.appendTrace(trace);
-    let queuedPromotion = false;
+    let promotion = null;
 
     if (this.shouldPromote(trace)) {
-      this.store.appendPromotion(buildPromotion(trace));
-      queuedPromotion = true;
+      promotion = buildPromotion(trace);
+      this.store.appendPromotion(promotion);
     }
 
     this.store.updateState((state) => {
-      updateCounters(state, trace, queuedPromotion);
+      updateCounters(state, trace, Boolean(promotion));
       updateDriveScores(state, trace);
-      updateGraoSignals(state, trace);
+      updateGraoSignals(state, trace, promotion);
       return state;
     });
   }
@@ -149,6 +149,44 @@ class RevenantsObserver {
       queuedPromotions: this.store.tailPromotions(limit),
     };
     return raw ? status : redactStatus(status);
+  }
+
+  reviewQueue(action = 'peek', opts = {}) {
+    const limit = Math.max(1, Math.min(Number(opts.limit) || 10, 50));
+
+    if (action === 'ack') {
+      const result = this.store.acknowledgePromotions(opts.ids || [], {
+        reviewer: opts.reviewer || 'agent',
+        note: opts.note,
+      });
+
+      this.store.updateState((state) => {
+        const remainingPromotions = this.store.readPromotions();
+        state.grao.activeProposals = refreshActiveProposals(remainingPromotions);
+        state.grao.lastProposalAt = remainingPromotions.at(-1)?.timestamp || null;
+        return state;
+      });
+
+      return {
+        action: 'ack',
+        acknowledgedCount: result.acknowledged.length,
+        acknowledgedIds: result.acknowledged.map((promotion) => promotion.id),
+        remainingCount: result.remaining,
+        recentReviewed: result.acknowledged.slice(-limit).map(redactPromotion),
+      };
+    }
+
+    const promotions = this.store.readPromotions();
+    const recent = promotions.slice(-limit);
+    const intents = summarizePromotionIntents(promotions);
+
+    return {
+      action: action === 'stats' ? 'stats' : 'peek',
+      queuedCount: promotions.length,
+      intents,
+      recent: recent.map(redactPromotion),
+      recentlyReviewed: this.store.readReviewedPromotions(limit).map(redactPromotion),
+    };
   }
 }
 
@@ -218,12 +256,44 @@ function updateDriveScores(state, trace) {
   if (trace.signalType === 'tooling') scores.goal_directed = clamp(scores.goal_directed + 0.02);
 }
 
-function updateGraoSignals(state, trace) {
+function updateGraoSignals(state, trace, promotion) {
   const gradients = new Set(state.grao.activeGradients || []);
   if (trace.result === 'failure' && trace.signalType === 'tooling') gradients.add('tool-call-reliability');
   if (trace.signalType === 'memory') gradients.add('context-integrity');
   if (trace.signalType === 'runtime') gradients.add('runtime-stability');
   state.grao.activeGradients = [...gradients].slice(-10);
+  if (trace.result === 'failure') state.grao.knownFailureCount += 1;
+  if (promotion) {
+    state.grao.activeProposals = refreshActiveProposals([
+      ...(Array.isArray(state.grao.activeProposals) ? state.grao.activeProposals : []).map((intent) => ({ intent })),
+      promotion,
+    ]);
+    state.grao.lastProposalAt = promotion.timestamp;
+  }
+}
+
+function refreshActiveProposals(promotions) {
+  const intents = [];
+  const seen = new Set();
+  for (const promotion of (promotions || []).slice().reverse()) {
+    const intent = promotion?.intent;
+    if (!intent || seen.has(intent)) continue;
+    seen.add(intent);
+    intents.push(intent);
+    if (intents.length >= 10) break;
+  }
+  return intents.reverse();
+}
+
+function summarizePromotionIntents(promotions) {
+  const counts = new Map();
+  for (const promotion of promotions || []) {
+    const intent = promotion?.intent || 'unknown';
+    counts.set(intent, (counts.get(intent) || 0) + 1);
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([intent, count]) => ({ intent, count }));
 }
 
 function clamp(value) {

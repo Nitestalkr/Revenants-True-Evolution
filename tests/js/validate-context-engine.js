@@ -74,6 +74,7 @@ async function main() {
   assert.strictEqual(state.counters.messagesIngested, 1);
   assert.strictEqual(state.counters.turnsObserved, 1);
   assert.ok(state.grao.activeGradients.includes('tool-call-reliability'));
+  assert.ok(state.grao.activeProposals.includes('track-tool-reliability'));
   pass('state updated with reliability gradient');
 
   const compact = await engine.compact({

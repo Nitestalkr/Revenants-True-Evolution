@@ -25,6 +25,7 @@ export default {
     observer.registerHooks(api);
     registerObserverService(api, observer);
     registerStatusTool(api, observer);
+    registerReviewQueueTool(api, observer);
 
     if (
       pluginConfig.registerContextEngine === true
@@ -151,6 +152,51 @@ function registerStatusTool(api, observer) {
         content: [{
           type: 'text',
           text: JSON.stringify(status, null, 2),
+        }],
+      };
+    },
+  });
+}
+
+function registerReviewQueueTool(api, observer) {
+  if (typeof api.registerTool !== 'function') return;
+
+  api.registerTool({
+    name: 'revenants_review_queue',
+    description: 'Inspect or acknowledge queued Revenants promotion signals for agent review.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['peek', 'stats', 'ack'],
+          default: 'peek',
+        },
+        limit: {
+          type: 'integer',
+          minimum: 1,
+          maximum: 50,
+          default: 10,
+        },
+        ids: {
+          type: 'array',
+          items: { type: 'string' },
+        },
+        reviewer: {
+          type: 'string',
+        },
+        note: {
+          type: 'string',
+        },
+      },
+    },
+    execute: async ({ action = 'peek', limit = 10, ids = [], reviewer, note } = {}) => {
+      const result = observer.reviewQueue(action, { limit, ids, reviewer, note });
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify(result, null, 2),
         }],
       };
     },

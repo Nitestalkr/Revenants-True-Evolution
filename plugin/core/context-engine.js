@@ -157,6 +157,16 @@ function updateGraoSignals(state, trace) {
   if (trace.toolCalls.failed > 0 || trace.toolCalls.leakedAsText > 0) gradients.add('tool-call-reliability');
   if (trace.toolCalls.attempted > 0) gradients.add('trace-density');
   state.grao.activeGradients = [...gradients].slice(-10);
+  if (trace.toolCalls.failed > 0) state.grao.knownFailureCount += trace.toolCalls.failed;
+  state.grao.activeProposals = deriveActiveProposals(state.grao.activeProposals, trace);
+  if (state.grao.activeProposals.length > 0) state.grao.lastProposalAt = trace.timestamp;
+}
+
+function deriveActiveProposals(existing, trace) {
+  const intents = new Set(Array.isArray(existing) ? existing : []);
+  if (trace.toolCalls.failed > 0) intents.add('stabilize-runtime');
+  if (trace.toolCalls.leakedAsText > 0) intents.add('track-tool-reliability');
+  return [...intents].slice(-10);
 }
 
 function estimateTokens(messages, addition = '') {

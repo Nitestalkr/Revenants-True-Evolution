@@ -9,6 +9,7 @@ class DataStore {
     this.dataDir = path.join(rootDir, 'data');
     this.tracesFile = path.join(this.dataDir, 'traces.jsonl');
     this.promotionsFile = path.join(this.dataDir, 'promotions.jsonl');
+    this.reviewedPromotionsFile = path.join(this.dataDir, 'reviewed-promotions.jsonl');
     this.stateFile = path.join(this.dataDir, 'context-state.json');
   }
 
@@ -60,17 +61,72 @@ class DataStore {
     return this.tailJsonl(this.promotionsFile, limit);
   }
 
+  readPromotions() {
+    return this.readJsonl(this.promotionsFile);
+  }
+
+  readReviewedPromotions(limit = 20) {
+    return this.tailJsonl(this.reviewedPromotionsFile, limit);
+  }
+
+  acknowledgePromotions(ids = [], meta = {}) {
+    const wanted = new Set((ids || []).map((id) => String(id)));
+    if (wanted.size === 0) return { acknowledged: [], remaining: this.readPromotions().length };
+
+    const promotions = this.readPromotions();
+    const acknowledged = [];
+    const remaining = [];
+
+    for (const promotion of promotions) {
+      if (wanted.has(String(promotion.id))) {
+        const reviewed = {
+          ...promotion,
+          reviewedAt: new Date().toISOString(),
+          reviewMeta: meta,
+        };
+        acknowledged.push(reviewed);
+      } else {
+        remaining.push(promotion);
+      }
+    }
+
+    if (acknowledged.length > 0) {
+      this.ensure();
+      fs.appendFileSync(
+        this.reviewedPromotionsFile,
+        acknowledged.map((entry) => JSON.stringify(entry)).join('\n') + '\n',
+      );
+      this.writeJsonl(this.promotionsFile, remaining);
+    }
+
+    return {
+      acknowledged,
+      remaining: remaining.length,
+    };
+  }
+
   tailJsonl(file, limit = 20) {
+    return this.readJsonl(file).slice(-limit);
+  }
+
+  readJsonl(file) {
     this.ensure();
     if (!fs.existsSync(file)) return [];
-    const lines = fs.readFileSync(file, 'utf8').trim().split('\n').filter(Boolean);
-    return lines.slice(-limit).map((line) => {
+    const raw = fs.readFileSync(file, 'utf8').trim();
+    if (!raw) return [];
+    return raw.split('\n').filter(Boolean).map((line) => {
       try {
         return JSON.parse(line);
       } catch (_) {
         return null;
       }
     }).filter(Boolean);
+  }
+
+  writeJsonl(file, entries) {
+    this.ensure();
+    const body = (entries || []).map((entry) => JSON.stringify(entry)).join('\n');
+    fs.writeFileSync(file, body ? `${body}\n` : '');
   }
 
   defaultState() {
