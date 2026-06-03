@@ -26,7 +26,11 @@ export default {
     registerObserverService(api, observer);
     registerStatusTool(api, observer);
 
-    if (pluginConfig.registerContextEngine === true && typeof api.registerContextEngine === 'function') {
+    if (
+      pluginConfig.registerContextEngine === true
+      && pluginConfig.contextEngineSlot === 'libravdb-adjacent'
+      && typeof api.registerContextEngine === 'function'
+    ) {
       api.registerContextEngine('revenants', (ctx) => createRevenantsContextEngine({
         ...ctx,
         pluginConfig: {
@@ -36,6 +40,8 @@ export default {
         logger: api.logger,
       }));
       api.logger?.info?.('revenants: registered experimental context engine.');
+    } else if (pluginConfig.registerContextEngine === true) {
+      api.logger?.warn?.('revenants: context engine registration requested but blocked without contextEngineSlot="libravdb-adjacent".');
     } else {
       api.logger?.info?.('revenants: companion observer mode active; LibraVDB can remain the primary context engine.');
     }
@@ -86,10 +92,14 @@ function registerStatusTool(api, observer) {
           maximum: 50,
           default: 10,
         },
+        includeRaw: {
+          type: 'boolean',
+          default: false,
+        },
       },
     },
-    execute: async ({ limit = 10 } = {}) => {
-      const status = observer.getStatus(limit);
+    execute: async ({ limit = 10, includeRaw = false } = {}) => {
+      const status = observer.getStatus(limit, { includeRaw });
       return {
         content: [{
           type: 'text',

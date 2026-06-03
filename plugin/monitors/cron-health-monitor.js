@@ -1,22 +1,25 @@
 'use strict';
 
 /**
- * Cron Health Monitor — real-time cron execution tracking and failure detection
- * Replaces: Cron Health Monitor cron (periodic check)
+ * Legacy Cron Signal Monitor — optional historical cron execution tracker.
+ *
+ * Revenants is plugin-native. This monitor is disabled by MonitorSuite unless
+ * explicitly configured for migration review of historical cron-era signals.
  */
 
 const EventEmitter = require('events');
 const fs = require('fs');
 const path = require('path');
+const { resolveDataFile } = require('../core/storage-paths');
 
 const CHECK_INTERVAL_MS = 30000; // 30s
-const DATA_FILE = path.join(__dirname, '..', 'data', 'cron-health.json');
 const TIMEOUT_TOLERANCE_MS = 60000; // flag if cron hasn't reported in 2x expected interval
 
-class CronHealthMonitor extends EventEmitter {
+class LegacyCronSignalMonitor extends EventEmitter {
   constructor(opts = {}) {
     super();
     this.opts = opts;
+    this.dataFile = resolveDataFile(opts, 'legacy-cron-signals.json');
     this._timer = null;
     this._jobs = {}; // name -> { lastRun, lastSuccess, failures, interval, status }
     this._alerts = [];
@@ -38,7 +41,7 @@ class CronHealthMonitor extends EventEmitter {
     this.emit('stopped');
   }
 
-  /** Register a cron job to track */
+  /** Register a historical cron-era signal to track during migration review. */
   registerJob(name, opts = {}) {
     if (!this._jobs[name]) {
       this._jobs[name] = {
@@ -55,7 +58,7 @@ class CronHealthMonitor extends EventEmitter {
     }
   }
 
-  /** Call when a cron job starts execution */
+  /** Call when a historical cron-era signal starts execution. */
   reportStart(name) {
     const job = this._ensureJob(name);
     job.lastRun = new Date().toISOString();
@@ -64,7 +67,7 @@ class CronHealthMonitor extends EventEmitter {
     this._saveState();
   }
 
-  /** Call when a cron job completes successfully */
+  /** Call when a historical cron-era signal completes successfully. */
   reportSuccess(name, meta = {}) {
     const job = this._ensureJob(name);
     job.lastSuccess = new Date().toISOString();
@@ -74,7 +77,7 @@ class CronHealthMonitor extends EventEmitter {
     this._saveState();
   }
 
-  /** Call when a cron job fails */
+  /** Call when a historical cron-era signal fails. */
   reportFailure(name, reason = 'unknown', meta = {}) {
     const job = this._ensureJob(name);
     job.lastFailure = new Date().toISOString();
@@ -83,7 +86,7 @@ class CronHealthMonitor extends EventEmitter {
     job.reason = reason;
 
     const alert = {
-      type: 'cron_failure',
+      type: 'legacy_cron_failure',
       job: name,
       reason,
       failures: job.failures,
@@ -96,7 +99,7 @@ class CronHealthMonitor extends EventEmitter {
     this._saveState();
   }
 
-  /** Call when a cron job times out */
+  /** Call when a historical cron-era signal times out. */
   reportTimeout(name, durationMs) {
     this.reportFailure(name, `timeout after ${Math.round(durationMs / 1000)}s`);
     this.emit('job_timeout', { name, durationMs, ts: new Date().toISOString() });
@@ -120,7 +123,7 @@ class CronHealthMonitor extends EventEmitter {
       if (elapsed > expectedMax && job.status !== 'stale') {
         job.status = 'stale';
         const alert = {
-          type: 'cron_stale',
+          type: 'legacy_cron_stale',
           job: job.name,
           elapsedMs: elapsed,
           expectedMs: job.intervalMs,
@@ -144,14 +147,14 @@ class CronHealthMonitor extends EventEmitter {
   }
 
   _ensureDataDir() {
-    const dir = path.dirname(DATA_FILE);
+    const dir = path.dirname(this.dataFile);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   }
 
   _loadState() {
     try {
-      if (fs.existsSync(DATA_FILE)) {
-        const saved = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+      if (fs.existsSync(this.dataFile)) {
+        const saved = JSON.parse(fs.readFileSync(this.dataFile, 'utf8'));
         this._jobs = saved.jobs ?? {};
         this._alerts = saved.alerts ?? [];
       }
@@ -160,7 +163,7 @@ class CronHealthMonitor extends EventEmitter {
 
   _saveState() {
     try {
-      fs.writeFileSync(DATA_FILE, JSON.stringify({
+      fs.writeFileSync(this.dataFile, JSON.stringify({
         jobs: this._jobs,
         alerts: this._alerts.slice(-50),
         ts: new Date().toISOString(),
@@ -169,4 +172,4 @@ class CronHealthMonitor extends EventEmitter {
   }
 }
 
-module.exports = CronHealthMonitor;
+module.exports = LegacyCronSignalMonitor;

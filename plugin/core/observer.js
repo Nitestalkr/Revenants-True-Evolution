@@ -1,10 +1,9 @@
 'use strict';
 
-const path = require('path');
-const os = require('os');
 const DataStore = require('./data-store');
 const MonitorSuite = require('../monitors/monitor-suite');
 const { normalizeHookTrace, buildPromotion } = require('./trace-normalizer');
+const { resolveRuntimeRoot } = require('./storage-paths');
 
 const DEFAULT_HOOKS = [
   'gateway_start',
@@ -36,11 +35,7 @@ class RevenantsObserver {
     this.api = null;
     this.logger = ctx.logger || console;
     this.pluginConfig = ctx.pluginConfig || {};
-    this.rootDir = ctx.rootDir
-      ? path.resolve(ctx.rootDir)
-      : this.pluginConfig.dataDir
-      ? path.resolve(this.pluginConfig.dataDir)
-      : resolveDefaultRootDir();
+    this.rootDir = resolveRuntimeRoot({ ...this.pluginConfig, dataDir: ctx.rootDir || this.pluginConfig.dataDir });
     this.store = new DataStore(this.rootDir);
     this.suite = null;
     this.started = false;
@@ -103,7 +98,10 @@ class RevenantsObserver {
 
   startMonitorSuite() {
     if (this.suite) return;
-    this.suite = new MonitorSuite(this.pluginConfig.monitors || {});
+    this.suite = new MonitorSuite({
+      ...(this.pluginConfig.monitors || {}),
+      dataDir: this.rootDir,
+    });
     this.suite.on('alert', (alert) => this.recordHook('monitor_alert', alert));
     this.suite.start();
   }
@@ -133,13 +131,15 @@ class RevenantsObserver {
   }
 
   shouldPromote(trace) {
+    if (this.pluginConfig.queueMemoryProposals === false) return false;
     if (this.pluginConfig.promoteToMemory === false) return false;
     if (trace.result === 'failure' || trace.result === 'partial') return true;
-    return Number(trace.impactScore || 0) >= Number(this.pluginConfig.promotionMinImpact ?? 0.7);
+    return Number(trace.impactScore || 0) >= Number(this.pluginConfig.proposalMinImpact ?? this.pluginConfig.promotionMinImpact ?? 0.7);
   }
 
-  getStatus(limit = 10) {
-    return {
+  getStatus(limit = 10, opts = {}) {
+    const raw = opts.includeRaw === true && this.pluginConfig.allowRawStatus === true;
+    const status = {
       mode: this.pluginConfig.registerContextEngine === true ? 'context-engine-plus-observer' : 'companion-observer',
       started: this.started,
       monitorsRunning: Boolean(this.suite),
@@ -148,7 +148,55 @@ class RevenantsObserver {
       recentTraces: this.store.tailTraces(limit),
       queuedPromotions: this.store.tailPromotions(limit),
     };
+    return raw ? status : redactStatus(status);
   }
+}
+
+function redactStatus(status) {
+  return {
+    ...status,
+    recentTraces: status.recentTraces.map(redactTrace),
+    queuedPromotions: status.queuedPromotions.map(redactPromotion),
+  };
+}
+
+function redactTrace(trace) {
+  return {
+    id: trace.id,
+    timestamp: trace.timestamp,
+    signalType: trace.signalType,
+    source: trace.source,
+    target: trace.target === 'openclaw-runtime' ? trace.target : '[session]',
+    action: trace.action,
+    result: trace.result,
+    impactScore: trace.impactScore,
+    metadata: redactMetadata(trace.metadata || {}),
+  };
+}
+
+function redactPromotion(promotion) {
+  return {
+    id: promotion.id,
+    timestamp: promotion.timestamp,
+    signalType: promotion.signalType,
+    source: promotion.source,
+    target: 'libravdb-review-queue',
+    intent: promotion.intent,
+    impactScore: promotion.impactScore,
+    summary: promotion.summary,
+    evidence: promotion.evidence ? {
+      action: promotion.evidence.action,
+      result: promotion.evidence.result,
+      metadata: redactMetadata(promotion.evidence.metadata || {}),
+    } : undefined,
+  };
+}
+
+function redactMetadata(metadata) {
+  const allowed = ['toolName', 'modelId', 'provider', 'status', 'trigger', 'durationMs'];
+  return Object.fromEntries(allowed
+    .filter((key) => metadata[key] !== undefined)
+    .map((key) => [key, metadata[key]]));
 }
 
 function updateCounters(state, trace, queuedPromotion) {
@@ -183,17 +231,9 @@ function clamp(value) {
   return Math.max(0, Math.min(1, value));
 }
 
-function resolveDefaultRootDir() {
-  if (process.env.OPENCLAW_STATE_DIR) {
-    return path.resolve(process.env.OPENCLAW_STATE_DIR, 'revenants');
-  }
-
-  return path.join(os.tmpdir(), 'revenants');
-}
-
 module.exports = {
   RevenantsObserver,
   createRevenantsObserver,
   DEFAULT_HOOKS,
-  resolveDefaultRootDir,
+  resolveDefaultRootDir: resolveRuntimeRoot,
 };

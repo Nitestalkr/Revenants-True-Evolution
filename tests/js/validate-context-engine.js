@@ -11,7 +11,6 @@ async function main() {
   const engine = createRevenantsContextEngine({
     pluginConfig: {
       dataDir: tempDir,
-      injectContext: true,
       startMonitors: false,
     },
   });
@@ -37,9 +36,27 @@ async function main() {
     availableTools: new Set(['exec']),
     model: 'test/model',
   });
-  assert.ok(assembled.systemPromptAddition.includes('Revenants Context'));
+  assert.strictEqual(assembled.systemPromptAddition, undefined);
   assert.strictEqual(assembled.messages.length, 1);
-  pass('assemble injects context');
+  pass('assemble does not inject context by default');
+
+  const injectingEngine = createRevenantsContextEngine({
+    pluginConfig: {
+      dataDir: tempDir,
+      injectContext: true,
+      startMonitors: false,
+    },
+  });
+  const injected = await injectingEngine.assemble({
+    sessionId: 's1',
+    sessionKey: 'agent:test',
+    messages: [{ role: 'user', content: 'hello' }],
+    availableTools: new Set(['exec']),
+    model: 'test/model',
+  });
+  assert.ok(injected.systemPromptAddition.includes('Revenants Context'));
+  assert.strictEqual(injected.messages.length, 1);
+  pass('assemble injects context only when explicitly enabled');
 
   await engine.afterTurn({
     sessionId: 's1',

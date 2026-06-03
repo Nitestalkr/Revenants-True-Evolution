@@ -1,10 +1,9 @@
 'use strict';
 
-const path = require('path');
-const os = require('os');
 const DataStore = require('./data-store');
 const MonitorSuite = require('../monitors/monitor-suite');
 const { normalizeMessageTrace, normalizeTurnTrace } = require('./trace-normalizer');
+const { resolveRuntimeRoot } = require('./storage-paths');
 
 function createRevenantsContextEngine(ctx = {}) {
   return new RevenantsContextEngine(ctx);
@@ -13,10 +12,8 @@ function createRevenantsContextEngine(ctx = {}) {
 class RevenantsContextEngine {
   constructor(ctx = {}) {
     this.ctx = ctx;
-    this.rootDir = ctx.pluginConfig?.dataDir
-      ? path.resolve(ctx.pluginConfig.dataDir)
-      : resolveDefaultRootDir();
-    this.injectContext = ctx.pluginConfig?.injectContext !== false;
+    this.rootDir = resolveRuntimeRoot(ctx.pluginConfig || {});
+    this.injectContext = ctx.pluginConfig?.injectContext === true;
     this.startMonitors = ctx.pluginConfig?.startMonitors === true;
     this.store = new DataStore(this.rootDir);
     this.suite = null;
@@ -39,7 +36,7 @@ class RevenantsContextEngine {
   async bootstrap() {
     this.store.ensure();
     if (this.startMonitors && !this.suite) {
-      this.suite = new MonitorSuite();
+      this.suite = new MonitorSuite({ dataDir: this.rootDir });
       this.suite.start();
     }
     return { bootstrapped: true };
@@ -176,17 +173,9 @@ function clamp(value) {
   return Math.max(0, Math.min(1, value));
 }
 
-function resolveDefaultRootDir() {
-  if (process.env.OPENCLAW_STATE_DIR) {
-    return path.resolve(process.env.OPENCLAW_STATE_DIR, 'revenants');
-  }
-
-  return path.join(os.tmpdir(), 'revenants');
-}
-
 module.exports = {
   RevenantsContextEngine,
   createRevenantsContextEngine,
   buildContextBlock,
-  resolveDefaultRootDir,
+  resolveDefaultRootDir: resolveRuntimeRoot,
 };

@@ -11,7 +11,7 @@
 
 const MonitorSuite = require('../../plugin/monitors/monitor-suite');
 const BoredomMonitor = require('../../plugin/monitors/boredom-monitor');
-const CronHealthMonitor = require('../../plugin/monitors/cron-health-monitor');
+const LegacyCronSignalMonitor = require('../../plugin/monitors/cron-health-monitor');
 const AlertSystem = require('../../plugin/monitors/alert-system');
 
 let passed = 0;
@@ -60,9 +60,9 @@ async function testBoredomMonitor() {
   assert(true, 'stop() does not throw');
 }
 
-async function testCronHealthMonitor() {
-  console.log('\n[2] CronHealthMonitor');
-  const m = new CronHealthMonitor();
+async function testLegacyCronSignalMonitor() {
+  console.log('\n[2] LegacyCronSignalMonitor');
+  const m = new LegacyCronSignalMonitor();
   let alertFired = false;
   m.on('alert', () => { alertFired = true; });
 
@@ -80,7 +80,7 @@ async function testCronHealthMonitor() {
   m.reportFailure('test-cron', 'test failure');
   const failedJob = m.getState().jobs.find(j => j.name === 'test-cron');
   assert(failedJob.status === 'failed', 'job status failed after failure');
-  assert(alertFired, 'alert fired on failure');
+  assert(alertFired, 'alert fired on legacy cron failure');
 
   m.stop();
 }
@@ -88,25 +88,25 @@ async function testCronHealthMonitor() {
 async function testAlertSystem() {
   console.log('\n[3] AlertSystem + wiring');
   const boredom = new BoredomMonitor();
-  const cronHealth = new CronHealthMonitor();
+  const legacyCronSignals = new LegacyCronSignalMonitor();
   const alerts = new AlertSystem();
 
   alerts.attachMonitor('boredom', boredom);
-  alerts.attachMonitor('cronHealth', cronHealth);
+  alerts.attachMonitor('legacyCronSignals', legacyCronSignals);
 
   let receivedAlert = null;
   alerts.subscribe('test-session', msg => { receivedAlert = msg; });
 
-  // Trigger a cron failure alert
-  cronHealth.start();
-  cronHealth.reportFailure('some-cron', 'test reason');
+  // Trigger a historical cron signal failure alert
+  legacyCronSignals.start();
+  legacyCronSignals.reportFailure('some-cron', 'test reason');
 
   await delay(100);
 
   assert(receivedAlert !== null, 'subscriber received alert');
   assert(receivedAlert.type === 'monitor_alert', 'alert type is monitor_alert');
-  assert(receivedAlert.alert.type === 'cron_failure', 'inner alert type is cron_failure');
-  assert(receivedAlert.alert.severity === 'error', 'cron_failure severity is error');
+  assert(receivedAlert.alert.type === 'legacy_cron_failure', 'inner alert type is legacy_cron_failure');
+  assert(receivedAlert.alert.severity === 'error', 'legacy cron failure severity is error');
   assert(receivedAlert.alert.payload.job === 'some-cron', 'alert payload has job name');
 
   const queued = alerts.drainQueue();
@@ -114,7 +114,7 @@ async function testAlertSystem() {
   const afterDrain = alerts.drainQueue();
   assert(afterDrain.length === 0, 'queue empty after second drain');
 
-  cronHealth.stop();
+  legacyCronSignals.stop();
 }
 
 async function testMonitorSuite() {
@@ -127,20 +127,18 @@ async function testMonitorSuite() {
 
   suite.start();
 
-  // Report a cron failure to trigger an alert
-  suite.cronFailure('heartbeat', 'test failure from validate script');
-
   await delay(200);
 
   const snapshot = suite.getSnapshot();
   assert(snapshot.ts != null, 'snapshot has ts');
   assert(snapshot.boredom != null, 'snapshot has boredom');
   assert(snapshot.stability != null, 'snapshot has stability');
-  assert(snapshot.cronHealth != null, 'snapshot has cronHealth');
-  assert(alertReceived, 'suite subscriber received alert');
+  assert(snapshot.legacyCronSignals != null, 'snapshot has legacyCronSignals');
+  assert(snapshot.legacyCronSignals.enabled === false, 'legacy cron signals disabled by default');
+  assert(!alertReceived, 'default suite does not emit cron alerts');
 
   const drained = suite.drainAlerts();
-  assert(drained.length >= 1, 'drainAlerts returns queued alerts');
+  assert(drained.length === 0, 'drainAlerts is empty without explicit legacy cron input');
 
   suite.stop();
 }
@@ -156,9 +154,9 @@ async function main() {
   }
 
   try {
-    await testCronHealthMonitor();
+    await testLegacyCronSignalMonitor();
   } catch (e) {
-    console.error('CronHealthMonitor test threw:', e.message);
+    console.error('LegacyCronSignalMonitor test threw:', e.message);
     failed++;
   }
 

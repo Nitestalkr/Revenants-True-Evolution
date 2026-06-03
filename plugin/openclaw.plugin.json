@@ -25,28 +25,51 @@
         "type": "string"
       },
       "injectContext": {
-        "type": "boolean"
+        "type": "boolean",
+        "description": "Experimental opt-in. Leave false unless Revenants is explicitly allowed to inject context alongside LibraVDB."
       },
       "registerContextEngine": {
         "type": "boolean",
         "description": "Experimental opt-in. Leave false when LibraVDB owns the context engine slot."
       },
+      "contextEngineSlot": {
+        "type": "string",
+        "enum": [
+          "libravdb-adjacent"
+        ],
+        "description": "Required guard value before registering the experimental context engine."
+      },
       "startMonitors": {
         "type": "boolean"
       },
+      "queueMemoryProposals": {
+        "type": "boolean",
+        "description": "Queue reviewed proposal signals for LibraVDB/agent review; does not directly mutate memory."
+      },
+      "proposalMinImpact": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      },
       "promoteToMemory": {
-        "type": "boolean"
+        "type": "boolean",
+        "description": "Deprecated compatibility flag; use queueMemoryProposals."
       },
       "promotionMinImpact": {
         "type": "number",
         "minimum": 0,
-        "maximum": 1
+        "maximum": 1,
+        "description": "Deprecated compatibility flag; use proposalMinImpact."
       },
       "hooks": {
         "type": "array",
         "items": {
           "type": "string"
         }
+      },
+      "allowRawStatus": {
+        "type": "boolean",
+        "description": "Development-only. Allows revenants_status includeRaw to return unredacted traces."
       }
     }
   }

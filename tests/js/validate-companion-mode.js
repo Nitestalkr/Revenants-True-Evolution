@@ -10,7 +10,7 @@ async function main() {
 
   const api = createFakeApi({
     dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'revenants-companion-')),
-    promoteToMemory: true,
+    queueMemoryProposals: true,
   });
 
   plugin.register(api);
@@ -43,7 +43,8 @@ async function main() {
   assert.strictEqual(status.state.counters.toolCallsObserved, 1);
   assert.strictEqual(status.state.counters.toolFailuresObserved, 1);
   assert.ok(status.recentTraces.some((trace) => trace.action === 'before_prompt_build'));
-  assert.ok(status.recentTraces.some((trace) => trace.sessionKey === 'discord:general'));
+  assert.ok(!status.recentTraces.some((trace) => trace.sessionKey), 'status output should redact session keys by default');
+  assert.ok(!status.recentTraces.some((trace) => trace.metadata?.channelId), 'status output should redact channel ids by default');
   assert.ok(status.state.counters.promotionsQueued >= 1, 'failed tool trace should queue a promotion');
   assert.ok(status.queuedPromotions.some((promotion) => promotion.intent === 'stabilize-runtime'));
 
@@ -52,8 +53,16 @@ async function main() {
     registerContextEngine: true,
   });
   plugin.register(experimentalApi);
+  assert.strictEqual(experimentalApi.contextEngines.length, 0, 'context engine should require explicit LibraVDB-adjacent slot');
 
-  assert.strictEqual(experimentalApi.contextEngines.length, 1, 'experimental mode should register a context engine');
+  const guardedExperimentalApi = createFakeApi({
+    dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'revenants-context-')),
+    registerContextEngine: true,
+    contextEngineSlot: 'libravdb-adjacent',
+  });
+  plugin.register(guardedExperimentalApi);
+
+  assert.strictEqual(guardedExperimentalApi.contextEngines.length, 1, 'guarded experimental mode should register a context engine');
 
   console.log('✓ companion mode validation passed');
 }
