@@ -13,6 +13,9 @@ const MonitorSuite = require('../monitors/monitor-suite');
 const BoredomMonitor = require('../monitors/boredom-monitor');
 const LegacyCronSignalMonitor = require('../monitors/cron-health-monitor');
 const AlertSystem = require('../monitors/alert-system');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
 let passed = 0;
 let failed = 0;
@@ -33,7 +36,7 @@ function delay(ms) {
 
 async function testBoredomMonitor() {
   console.log('\n[1] BoredomMonitor');
-  const m = new BoredomMonitor();
+  const m = new BoredomMonitor({ dataDir: tempRuntimeDir('boredom') });
   let sampleCount = 0;
   let alertFired = false;
 
@@ -62,7 +65,7 @@ async function testBoredomMonitor() {
 
 async function testLegacyCronSignalMonitor() {
   console.log('\n[2] LegacyCronSignalMonitor');
-  const m = new LegacyCronSignalMonitor();
+  const m = new LegacyCronSignalMonitor({ dataDir: tempRuntimeDir('legacy-cron') });
   let alertFired = false;
   m.on('alert', () => { alertFired = true; });
 
@@ -87,9 +90,10 @@ async function testLegacyCronSignalMonitor() {
 
 async function testAlertSystem() {
   console.log('\n[3] AlertSystem + wiring');
-  const boredom = new BoredomMonitor();
-  const legacyCronSignals = new LegacyCronSignalMonitor();
-  const alerts = new AlertSystem();
+  const dataDir = tempRuntimeDir('alerts');
+  const boredom = new BoredomMonitor({ dataDir });
+  const legacyCronSignals = new LegacyCronSignalMonitor({ dataDir });
+  const alerts = new AlertSystem({ dataDir });
 
   alerts.attachMonitor('boredom', boredom);
   alerts.attachMonitor('legacyCronSignals', legacyCronSignals);
@@ -119,7 +123,11 @@ async function testAlertSystem() {
 
 async function testMonitorSuite() {
   console.log('\n[4] MonitorSuite orchestrator');
-  const suite = new MonitorSuite({ gatewayUrl: 'http://localhost:3000' });
+  const suite = new MonitorSuite({
+    dataDir: tempRuntimeDir('suite'),
+    gatewayUrl: 'http://localhost:3000',
+    arxiv: { enabled: false },
+  });
 
   let alertReceived = false;
   suite.subscribe('agent-1', () => { alertReceived = true; });
@@ -145,6 +153,8 @@ async function testMonitorSuite() {
 
 async function main() {
   console.log('=== Monitor Suite Validation ===');
+  const sourceDataDir = path.resolve(__dirname, '..', 'data');
+  const before = snapshotDir(sourceDataDir);
 
   try {
     await testBoredomMonitor();
@@ -175,7 +185,33 @@ async function main() {
   }
 
   console.log(`\n=== Results: ${passed} passed, ${failed} failed ===`);
+  try {
+    assert(JSON.stringify(snapshotDir(sourceDataDir)) === JSON.stringify(before), 'validation does not mutate source-tree data/');
+  } catch (e) {
+    console.error(e.message);
+    failed++;
+  }
   process.exit(failed > 0 ? 1 : 0);
+}
+
+function tempRuntimeDir(label) {
+  return fs.mkdtempSync(path.join(os.tmpdir(), `revenants-${label}-`));
+}
+
+function snapshotDir(dir) {
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir, { recursive: true })
+    .map((entry) => {
+      const file = path.join(dir, entry);
+      const stat = fs.statSync(file);
+      return {
+        entry,
+        isFile: stat.isFile(),
+        size: stat.isFile() ? stat.size : 0,
+        mtimeMs: stat.mtimeMs,
+      };
+    })
+    .sort((a, b) => a.entry.localeCompare(b.entry));
 }
 
 main();

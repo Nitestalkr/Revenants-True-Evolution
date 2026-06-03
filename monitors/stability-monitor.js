@@ -4,7 +4,7 @@
  * Stability Monitor — continuous system health tracking
  * Replaces: Stability Monitor cron (periodic snapshots)
  *
- * Monitors: memory, CPU, drive health, cron status
+ * Monitors: memory, CPU, drive health, and optional legacy cron signal status.
  */
 
 const EventEmitter = require('events');
@@ -30,7 +30,7 @@ class StabilityMonitor extends EventEmitter {
     this._timer = null;
     this._alerts = [];
     this._history = [];
-    this._cronStatuses = {};
+    this._legacyCronStatuses = {};
   }
 
   start() {
@@ -49,15 +49,15 @@ class StabilityMonitor extends EventEmitter {
     this.emit('stopped');
   }
 
-  /** Update cron job status from external source */
-  updateCronStatus(jobName, status) {
-    this._cronStatuses[jobName] = {
+  /** Update historical cron-era signal status from external source. */
+  updateLegacyCronStatus(jobName, status) {
+    this._legacyCronStatuses[jobName] = {
       ...status,
       updatedAt: new Date().toISOString(),
     };
     if (status.failed) {
       const alert = {
-        type: 'cron_failure',
+        type: 'legacy_cron_failure',
         job: jobName,
         reason: status.reason ?? 'unknown',
         ts: new Date().toISOString(),
@@ -67,12 +67,16 @@ class StabilityMonitor extends EventEmitter {
     }
   }
 
+  updateCronStatus(jobName, status) {
+    this.updateLegacyCronStatus(jobName, status);
+  }
+
   getState() {
     return {
       memory: this._getMemoryMetrics(),
       cpu: this._getCpuMetrics(),
       disk: this._getDiskMetrics(),
-      cron: this._cronStatuses,
+      legacyCronSignals: this._legacyCronStatuses,
       alertCount: this._alerts.length,
       ts: new Date().toISOString(),
     };
@@ -165,7 +169,7 @@ class StabilityMonitor extends EventEmitter {
       fs.writeFileSync(this.dataFile, JSON.stringify({
         current: this.getState(),
         history: this._history.slice(-6),
-        cron: this._cronStatuses,
+        legacyCronSignals: this._legacyCronStatuses,
         ts: new Date().toISOString(),
       }, null, 2));
     } catch (_) { /* non-fatal */ }

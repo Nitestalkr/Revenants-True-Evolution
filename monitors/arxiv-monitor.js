@@ -32,6 +32,7 @@ const DEFAULT_CATEGORIES = ['cs.AI', 'cs.NE', 'q-bio.NC', 'cond-mat.dis-nn'];
 class ArXivMonitor extends EventEmitter {
   constructor(opts = {}) {
     super();
+    this.enabled = opts.enabled !== false;
     this.keywords = opts.keywords ?? DEFAULT_KEYWORDS;
     this.categories = opts.categories ?? DEFAULT_CATEGORIES;
     this._timer = null;
@@ -45,6 +46,10 @@ class ArXivMonitor extends EventEmitter {
   start() {
     this._ensureDataDir();
     this._loadState();
+    if (!this.enabled) {
+      this.emit('started', { enabled: false, keywords: this.keywords });
+      return;
+    }
     this._poll(); // immediate first poll
     this._timer = setInterval(() => this._poll(), POLL_INTERVAL_MS);
     this.emit('started', { keywords: this.keywords });
@@ -61,6 +66,7 @@ class ArXivMonitor extends EventEmitter {
 
   getState() {
     return {
+      enabled: this.enabled,
       lastPoll: this._lastPoll,
       matchCount: this._matches.length,
       seenCount: this._seen.size,

@@ -4,6 +4,8 @@ const require = createRequire(import.meta.url);
 const { createRevenantsContextEngine } = require('./core/context-engine.js');
 const { createRevenantsObserver } = require('./core/observer.js');
 
+const LIBRAVDB_ADJACENT_SLOT = 'libravdb-adjacent';
+
 export default {
   id: 'revenants',
   name: 'Revenants',
@@ -21,7 +23,7 @@ export default {
 
     if (
       pluginConfig.registerContextEngine === true
-      && pluginConfig.contextEngineSlot === 'libravdb-adjacent'
+      && pluginConfig.contextEngineSlot === LIBRAVDB_ADJACENT_SLOT
       && typeof api.registerContextEngine === 'function'
     ) {
       api.registerContextEngine('revenants', (ctx) => createRevenantsContextEngine({
@@ -29,9 +31,9 @@ export default {
         pluginConfig,
         logger: api.logger,
       }));
-      api.logger?.info?.('revenants: registered experimental context engine.');
+      api.logger?.info?.('revenants: registered experimental LibraVDB-adjacent context engine.');
     } else if (pluginConfig.registerContextEngine === true) {
-      api.logger?.warn?.('revenants: context engine registration requested but blocked without contextEngineSlot="libravdb-adjacent".');
+      api.logger?.warn?.(`revenants: context engine registration blocked; LibraVDB remains authority unless contextEngineSlot="${LIBRAVDB_ADJACENT_SLOT}".`);
     } else {
       api.logger?.info?.('revenants: companion observer mode active; LibraVDB can remain the primary context engine.');
     }

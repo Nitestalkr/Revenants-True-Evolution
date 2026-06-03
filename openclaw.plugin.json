@@ -31,16 +31,36 @@
         "type": "boolean",
         "description": "Experimental opt-in. Leave false when LibraVDB owns the context engine slot."
       },
+      "contextEngineSlot": {
+        "type": "string",
+        "const": "libravdb-adjacent",
+        "description": "Required second guard for experimental context-engine registration. LibraVDB remains the default memory/context authority."
+      },
       "startMonitors": {
         "type": "boolean"
       },
+      "queueMemoryProposals": {
+        "type": "boolean"
+      },
       "promoteToMemory": {
+        "type": "boolean"
+      },
+      "allowRawStatus": {
         "type": "boolean"
       },
       "promotionMinImpact": {
         "type": "number",
         "minimum": 0,
         "maximum": 1
+      },
+      "proposalMinImpact": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      },
+      "monitors": {
+        "type": "object",
+        "additionalProperties": true
       },
       "hooks": {
         "type": "array",

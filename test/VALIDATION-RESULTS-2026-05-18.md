@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-18  
 **Run:** validate-monitor-suite.js  
-**Result:** 25 passed, 0 failed
+**Result:** 26 passed, 0 failed
 
 ## Test Coverage
 
@@ -15,11 +15,11 @@
 | BoredomMonitor: user activity suppresses boredom | PASS |
 | BoredomMonitor: triggered resets on activity | PASS |
 | BoredomMonitor: stop() clean | PASS |
-| CronHealthMonitor: job registered | PASS |
-| CronHealthMonitor: job exists in state | PASS |
-| CronHealthMonitor: status ok after success | PASS |
-| CronHealthMonitor: status failed after failure | PASS |
-| CronHealthMonitor: alert fires on failure | PASS |
+| LegacyCronSignalMonitor: job registered | PASS |
+| LegacyCronSignalMonitor: job exists in state | PASS |
+| LegacyCronSignalMonitor: status ok after success | PASS |
+| LegacyCronSignalMonitor: status failed after failure | PASS |
+| LegacyCronSignalMonitor: alert fires on failure | PASS |
 | AlertSystem: subscriber receives alert | PASS |
 | AlertSystem: alert type correct | PASS |
 | AlertSystem: inner alert type correct | PASS |
@@ -30,9 +30,10 @@
 | MonitorSuite: snapshot has ts | PASS |
 | MonitorSuite: snapshot has boredom | PASS |
 | MonitorSuite: snapshot has stability | PASS |
-| MonitorSuite: snapshot has cronHealth | PASS |
-| MonitorSuite: subscriber receives broadcast | PASS |
-| MonitorSuite: drainAlerts works | PASS |
+| MonitorSuite: snapshot has legacyCronSignals | PASS |
+| MonitorSuite: legacy cron signals disabled by default | PASS |
+| MonitorSuite: default suite does not emit cron alerts | PASS |
+| MonitorSuite: drainAlerts stays empty without explicit legacy cron input | PASS |
 
 ## Success Criteria Status
 
@@ -47,9 +48,9 @@
 | File | Purpose |
 |------|---------|
 | monitors/boredom-monitor.js | Continuous GNW boredom calculation |
-| monitors/stability-monitor.js | Memory, CPU, drive health, cron status |
+| monitors/stability-monitor.js | Memory, CPU, drive health, optional legacy cron signal status |
 | monitors/arxiv-monitor.js | Real-time arXiv paper detection |
-| monitors/cron-health-monitor.js | Cron execution tracking, failure detection |
+| monitors/cron-health-monitor.js | Historical cron-era signal tracking for migration review |
 | monitors/system-health-monitor.js | Gateway status, plugin/agent health |
 | monitors/alert-system.js | Alert aggregation and session broadcast |
 | monitors/monitor-suite.js | Orchestrator — wires all monitors together |
