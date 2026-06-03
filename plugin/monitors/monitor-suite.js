@@ -19,21 +19,24 @@ const ArXivMonitor = require('./arxiv-monitor');
 const CronHealthMonitor = require('./cron-health-monitor');
 const SystemHealthMonitor = require('./system-health-monitor');
 const AlertSystem = require('./alert-system');
+const path = require('path');
 
 class MonitorSuite extends EventEmitter {
   constructor(opts = {}) {
     super();
     this.opts = opts;
+    this.dataDir = opts.dataDir
+      ?? (opts.rootDir ? path.join(opts.rootDir, 'data') : undefined);
 
-    this.boredom = new BoredomMonitor(opts.boredom ?? {});
-    this.stability = new StabilityMonitor(opts.stability ?? {});
-    this.arxiv = new ArXivMonitor(opts.arxiv ?? {});
-    this.cronHealth = new CronHealthMonitor(opts.cronHealth ?? {});
+    this.boredom = new BoredomMonitor(this._withDataDir(opts.boredom));
+    this.stability = new StabilityMonitor(this._withDataDir(opts.stability));
+    this.arxiv = new ArXivMonitor(this._withDataDir(opts.arxiv));
+    this.cronHealth = new CronHealthMonitor(this._withDataDir(opts.cronHealth));
     this.systemHealth = new SystemHealthMonitor({
       gatewayUrl: opts.gatewayUrl ?? 'http://localhost:3000',
-      ...(opts.systemHealth ?? {}),
+      ...this._withDataDir(opts.systemHealth),
     });
-    this.alerts = new AlertSystem(opts.alerts ?? {});
+    this.alerts = new AlertSystem(this._withDataDir(opts.alerts));
 
     this._running = false;
     this._wireAlerts();
@@ -113,6 +116,12 @@ class MonitorSuite extends EventEmitter {
 
     // Bubble alert events up from suite
     this.alerts.on('alert', alert => this.emit('alert', alert));
+  }
+
+  _withDataDir(opts = {}) {
+    return this.dataDir && opts.dataDir === undefined
+      ? { ...opts, dataDir: this.dataDir }
+      : { ...opts };
   }
 }
 

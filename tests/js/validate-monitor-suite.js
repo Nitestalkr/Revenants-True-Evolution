@@ -13,6 +13,9 @@ const MonitorSuite = require('../../plugin/monitors/monitor-suite');
 const BoredomMonitor = require('../../plugin/monitors/boredom-monitor');
 const CronHealthMonitor = require('../../plugin/monitors/cron-health-monitor');
 const AlertSystem = require('../../plugin/monitors/alert-system');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
 let passed = 0;
 let failed = 0;
@@ -33,7 +36,8 @@ function delay(ms) {
 
 async function testBoredomMonitor() {
   console.log('\n[1] BoredomMonitor');
-  const m = new BoredomMonitor();
+  const dataDir = makeTempDataDir('revenants-boredom-');
+  const m = new BoredomMonitor({ dataDir });
   let sampleCount = 0;
   let alertFired = false;
 
@@ -56,13 +60,18 @@ async function testBoredomMonitor() {
   assert(afterState.boredom <= before, 'user activity does not increase boredom');
   assert(!afterState.triggered, 'triggered false after reset');
 
-  m.stop();
-  assert(true, 'stop() does not throw');
+  try {
+    m.stop();
+    assert(true, 'stop() does not throw');
+  } finally {
+    fs.rmSync(path.dirname(dataDir), { recursive: true, force: true });
+  }
 }
 
 async function testCronHealthMonitor() {
   console.log('\n[2] CronHealthMonitor');
-  const m = new CronHealthMonitor();
+  const dataDir = makeTempDataDir('revenants-cron-health-');
+  const m = new CronHealthMonitor({ dataDir });
   let alertFired = false;
   m.on('alert', () => { alertFired = true; });
 
@@ -82,14 +91,20 @@ async function testCronHealthMonitor() {
   assert(failedJob.status === 'failed', 'job status failed after failure');
   assert(alertFired, 'alert fired on failure');
 
-  m.stop();
+  try {
+    m.stop();
+  } finally {
+    fs.rmSync(path.dirname(dataDir), { recursive: true, force: true });
+  }
 }
 
 async function testAlertSystem() {
   console.log('\n[3] AlertSystem + wiring');
-  const boredom = new BoredomMonitor();
-  const cronHealth = new CronHealthMonitor();
-  const alerts = new AlertSystem();
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'revenants-alerts-'));
+  const dataDir = path.join(rootDir, 'data');
+  const boredom = new BoredomMonitor({ dataDir });
+  const cronHealth = new CronHealthMonitor({ dataDir });
+  const alerts = new AlertSystem({ dataDir });
 
   alerts.attachMonitor('boredom', boredom);
   alerts.attachMonitor('cronHealth', cronHealth);
@@ -114,12 +129,17 @@ async function testAlertSystem() {
   const afterDrain = alerts.drainQueue();
   assert(afterDrain.length === 0, 'queue empty after second drain');
 
-  cronHealth.stop();
+  try {
+    cronHealth.stop();
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
 }
 
 async function testMonitorSuite() {
   console.log('\n[4] MonitorSuite orchestrator');
-  const suite = new MonitorSuite({ gatewayUrl: 'http://localhost:3000' });
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'revenants-suite-'));
+  const suite = new MonitorSuite({ gatewayUrl: 'http://localhost:3000', rootDir });
 
   let alertReceived = false;
   suite.subscribe('agent-1', () => { alertReceived = true; });
@@ -142,7 +162,15 @@ async function testMonitorSuite() {
   const drained = suite.drainAlerts();
   assert(drained.length >= 1, 'drainAlerts returns queued alerts');
 
-  suite.stop();
+  try {
+    suite.stop();
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+}
+
+function makeTempDataDir(prefix) {
+  return path.join(fs.mkdtempSync(path.join(os.tmpdir(), prefix)), 'data');
 }
 
 async function main() {

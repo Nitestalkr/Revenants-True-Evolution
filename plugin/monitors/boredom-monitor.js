@@ -12,17 +12,18 @@
 const EventEmitter = require('events');
 const fs = require('fs');
 const path = require('path');
+const { resolveDefaultDataDir } = require('./runtime-paths');
 
 const THRESHOLD_TRIGGER = 0.50;
 const FLOOR_ACTIVE = 0.30;
 const BASE_RATE = 0.02; // boredom units per second idle
 const SAMPLE_INTERVAL_MS = 5000; // 5s continuous sampling
-const DATA_FILE = path.join(__dirname, '..', 'data', 'boredom-state.json');
-
 class BoredomMonitor extends EventEmitter {
   constructor(opts = {}) {
     super();
     this.opts = opts;
+    this.dataDir = opts.dataDir ?? resolveDefaultDataDir();
+    this.dataFile = path.join(this.dataDir, 'boredom-state.json');
     this._timer = null;
     this._boredom = 0;
     this._idleStart = Date.now();
@@ -115,14 +116,14 @@ class BoredomMonitor extends EventEmitter {
   }
 
   _ensureDataDir() {
-    const dir = path.dirname(DATA_FILE);
+    const dir = path.dirname(this.dataFile);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   }
 
   _loadState() {
     try {
-      if (fs.existsSync(DATA_FILE)) {
-        const saved = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+      if (fs.existsSync(this.dataFile)) {
+        const saved = JSON.parse(fs.readFileSync(this.dataFile, 'utf8'));
         this._boredom = saved.boredom ?? 0;
         this._triggered = saved.triggered ?? false;
       }
@@ -131,7 +132,7 @@ class BoredomMonitor extends EventEmitter {
 
   _saveState() {
     try {
-      fs.writeFileSync(DATA_FILE, JSON.stringify({
+      fs.writeFileSync(this.dataFile, JSON.stringify({
         boredom: parseFloat(this._boredom.toFixed(4)),
         triggered: this._triggered,
         ts: new Date().toISOString(),

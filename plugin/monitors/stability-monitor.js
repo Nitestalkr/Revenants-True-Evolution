@@ -11,10 +11,9 @@ const EventEmitter = require('events');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { resolveDefaultDataDir } = require('./runtime-paths');
 
 const SAMPLE_INTERVAL_MS = 10000; // 10s
-const DATA_FILE = path.join(__dirname, '..', 'data', 'stability-state.json');
-const ALERT_FILE = path.join(__dirname, '..', 'data', 'stability-alerts.json');
 
 const THRESHOLDS = {
   memUsedPct: 85,  // alert if >85% RAM used
@@ -26,6 +25,9 @@ class StabilityMonitor extends EventEmitter {
   constructor(opts = {}) {
     super();
     this.opts = opts;
+    this.dataDir = opts.dataDir ?? resolveDefaultDataDir();
+    this.dataFile = path.join(this.dataDir, 'stability-state.json');
+    this.alertFile = path.join(this.dataDir, 'stability-alerts.json');
     this._timer = null;
     this._alerts = [];
     this._history = [];
@@ -150,18 +152,19 @@ class StabilityMonitor extends EventEmitter {
     this._alerts.push(alert);
     if (this._alerts.length > 100) this._alerts.shift();
     try {
-      fs.writeFileSync(ALERT_FILE, JSON.stringify(this._alerts, null, 2));
+      this._ensureDataDir();
+      fs.writeFileSync(this.alertFile, JSON.stringify(this._alerts, null, 2));
     } catch (_) { /* non-fatal */ }
   }
 
   _ensureDataDir() {
-    const dir = path.dirname(DATA_FILE);
+    const dir = path.dirname(this.dataFile);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   }
 
   _saveState() {
     try {
-      fs.writeFileSync(DATA_FILE, JSON.stringify({
+      fs.writeFileSync(this.dataFile, JSON.stringify({
         current: this.getState(),
         history: this._history.slice(-6),
         cron: this._cronStatuses,

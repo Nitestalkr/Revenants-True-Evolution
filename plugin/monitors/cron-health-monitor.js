@@ -8,15 +8,17 @@
 const EventEmitter = require('events');
 const fs = require('fs');
 const path = require('path');
+const { resolveDefaultDataDir } = require('./runtime-paths');
 
 const CHECK_INTERVAL_MS = 30000; // 30s
-const DATA_FILE = path.join(__dirname, '..', 'data', 'cron-health.json');
 const TIMEOUT_TOLERANCE_MS = 60000; // flag if cron hasn't reported in 2x expected interval
 
 class CronHealthMonitor extends EventEmitter {
   constructor(opts = {}) {
     super();
     this.opts = opts;
+    this.dataDir = opts.dataDir ?? resolveDefaultDataDir();
+    this.dataFile = path.join(this.dataDir, 'cron-health.json');
     this._timer = null;
     this._jobs = {}; // name -> { lastRun, lastSuccess, failures, interval, status }
     this._alerts = [];
@@ -144,14 +146,14 @@ class CronHealthMonitor extends EventEmitter {
   }
 
   _ensureDataDir() {
-    const dir = path.dirname(DATA_FILE);
+    const dir = path.dirname(this.dataFile);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   }
 
   _loadState() {
     try {
-      if (fs.existsSync(DATA_FILE)) {
-        const saved = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+      if (fs.existsSync(this.dataFile)) {
+        const saved = JSON.parse(fs.readFileSync(this.dataFile, 'utf8'));
         this._jobs = saved.jobs ?? {};
         this._alerts = saved.alerts ?? [];
       }
@@ -160,7 +162,7 @@ class CronHealthMonitor extends EventEmitter {
 
   _saveState() {
     try {
-      fs.writeFileSync(DATA_FILE, JSON.stringify({
+      fs.writeFileSync(this.dataFile, JSON.stringify({
         jobs: this._jobs,
         alerts: this._alerts.slice(-50),
         ts: new Date().toISOString(),

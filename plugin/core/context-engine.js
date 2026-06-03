@@ -39,7 +39,7 @@ class RevenantsContextEngine {
   async bootstrap() {
     this.store.ensure();
     if (this.startMonitors && !this.suite) {
-      this.suite = new MonitorSuite();
+      this.suite = new MonitorSuite({ rootDir: this.rootDir });
       this.suite.start();
     }
     return { bootstrapped: true };

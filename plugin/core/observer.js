@@ -103,7 +103,10 @@ class RevenantsObserver {
 
   startMonitorSuite() {
     if (this.suite) return;
-    this.suite = new MonitorSuite(this.pluginConfig.monitors || {});
+    this.suite = new MonitorSuite({
+      ...(this.pluginConfig.monitors || {}),
+      rootDir: this.rootDir,
+    });
     this.suite.on('alert', (alert) => this.recordHook('monitor_alert', alert));
     this.suite.start();
   }

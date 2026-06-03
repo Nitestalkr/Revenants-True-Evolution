@@ -10,9 +10,7 @@
 const EventEmitter = require('events');
 const fs = require('fs');
 const path = require('path');
-
-const ALERT_FILE = path.join(__dirname, '..', 'data', 'alerts.json');
-const BROADCAST_FILE = path.join(__dirname, '..', 'data', 'broadcast-queue.json');
+const { resolveDefaultDataDir } = require('./runtime-paths');
 
 const SEVERITY = {
   boredom_threshold: 'info',
@@ -31,6 +29,9 @@ class AlertSystem extends EventEmitter {
   constructor(opts = {}) {
     super();
     this.opts = opts;
+    this.dataDir = opts.dataDir ?? resolveDefaultDataDir();
+    this.alertFile = path.join(this.dataDir, 'alerts.json');
+    this.broadcastFile = path.join(this.dataDir, 'broadcast-queue.json');
     this._alerts = [];
     this._queue = [];
     this._subscribers = new Map(); // sessionId -> handler fn
@@ -125,9 +126,9 @@ class AlertSystem extends EventEmitter {
 
   _saveAlerts() {
     try {
-      const dir = path.dirname(ALERT_FILE);
+      const dir = path.dirname(this.alertFile);
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(ALERT_FILE, JSON.stringify({
+      fs.writeFileSync(this.alertFile, JSON.stringify({
         alerts: this._alerts.slice(-100),
         ts: new Date().toISOString(),
       }, null, 2));
@@ -136,9 +137,9 @@ class AlertSystem extends EventEmitter {
 
   _saveBroadcastQueue() {
     try {
-      const dir = path.dirname(BROADCAST_FILE);
+      const dir = path.dirname(this.broadcastFile);
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(BROADCAST_FILE, JSON.stringify({
+      fs.writeFileSync(this.broadcastFile, JSON.stringify({
         queue: this._queue,
         ts: new Date().toISOString(),
       }, null, 2));
