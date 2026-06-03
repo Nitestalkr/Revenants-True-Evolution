@@ -73,11 +73,31 @@ class RevenantsObserver {
   }
 
   async stop() {
+    if (this.started) {
+      this.recordTrace({
+        id: `revenants-stop-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        signalType: 'runtime',
+        source: 'revenants',
+        target: 'openclaw-runtime',
+        action: 'plugin_stop',
+        result: 'success',
+        impactScore: 0.1,
+        metadata: {
+          registeredHookCount: this.registeredHooks.length,
+        },
+      });
+    }
     if (this.suite) {
       this.suite.stop();
       this.suite = null;
     }
     this.started = false;
+    this.store.updateState((state) => {
+      const runtime = ensureRuntimeState(state);
+      runtime.monitorsRunning = false;
+      return state;
+    });
   }
 
   registerHooks(api) {
@@ -104,6 +124,11 @@ class RevenantsObserver {
     });
     this.suite.on('alert', (alert) => this.recordHook('monitor_alert', alert));
     this.suite.start();
+    this.store.updateState((state) => {
+      const runtime = ensureRuntimeState(state);
+      runtime.monitorsRunning = true;
+      return state;
+    });
   }
 
   recordHook(hookName, event = {}, hookContext = {}) {
@@ -123,6 +148,10 @@ class RevenantsObserver {
     }
 
     this.store.updateState((state) => {
+      reconcileRuntimeStateFromTrace(state, trace, {
+        started: this.started,
+        monitorsRunning: Boolean(this.suite),
+      });
       updateCounters(state, trace, Boolean(promotion));
       updateDriveScores(state, trace);
       updateGraoSignals(state, trace, promotion);
@@ -139,13 +168,21 @@ class RevenantsObserver {
 
   getStatus(limit = 10, opts = {}) {
     const raw = opts.includeRaw === true && this.pluginConfig.allowRawStatus === true;
-    const status = {
-      mode: this.pluginConfig.registerContextEngine === true ? 'context-engine-plus-observer' : 'companion-observer',
+    const state = this.store.readState();
+    const recentTraces = this.store.tailTraces(limit);
+    const runtime = deriveRuntimeStatus({
+      state,
+      recentTraces,
       started: this.started,
       monitorsRunning: Boolean(this.suite),
+    });
+    const status = {
+      mode: this.pluginConfig.registerContextEngine === true ? 'context-engine-plus-observer' : 'companion-observer',
+      started: runtime.started,
+      monitorsRunning: runtime.monitorsRunning,
       registeredHooks: this.registeredHooks,
-      state: this.store.readState(),
-      recentTraces: this.store.tailTraces(limit),
+      state,
+      recentTraces,
       queuedPromotions: this.store.tailPromotions(limit),
     };
     return raw ? status : redactStatus(status);
@@ -244,6 +281,81 @@ function updateCounters(state, trace, queuedPromotion) {
   if (/tool/i.test(trace.action) && trace.result === 'failure') state.counters.toolFailuresObserved += 1;
   if (trace.action === 'agent_end') state.counters.turnsObserved += 1;
   if (queuedPromotion) state.counters.promotionsQueued += 1;
+}
+
+function reconcileRuntimeStateFromTrace(state, trace, volatile) {
+  const runtime = ensureRuntimeState(state);
+  runtime.lastTraceAt = trace.timestamp || new Date().toISOString();
+
+  if (trace.action === 'plugin_start' && trace.result === 'success') {
+    runtime.observerStartedAt = trace.timestamp || new Date().toISOString();
+    runtime.observerStoppedAt = null;
+    runtime.serviceStartCount += 1;
+  }
+
+  if (trace.action === 'plugin_stop' && trace.result === 'success') {
+    runtime.observerStoppedAt = trace.timestamp || new Date().toISOString();
+  }
+
+  runtime.monitorsRunning = Boolean(volatile?.monitorsRunning);
+}
+
+function deriveRuntimeStatus({ state, recentTraces, started, monitorsRunning }) {
+  const runtime = ensureRuntimeState(state);
+  const lastTraceAt = parseTimestamp(runtime.lastTraceAt)
+    || parseTimestamp(findLatestTraceTimestamp(recentTraces));
+  const observerStartedAt = parseTimestamp(runtime.observerStartedAt)
+    || parseTimestamp(findLatestTraceTimestamp(recentTraces, 'plugin_start'));
+  const observerStoppedAt = parseTimestamp(runtime.observerStoppedAt)
+    || parseTimestamp(findLatestTraceTimestamp(recentTraces, 'plugin_stop'));
+
+  const observedActive = Boolean(
+    lastTraceAt
+      && observerStartedAt
+      && lastTraceAt >= observerStartedAt
+      && (!observerStoppedAt || lastTraceAt > observerStoppedAt),
+  );
+
+  return {
+    started: Boolean(started || observedActive),
+    monitorsRunning: Boolean(monitorsRunning || runtime.monitorsRunning),
+  };
+}
+
+function findLatestTraceTimestamp(traces, action) {
+  let latest = null;
+  for (const trace of traces || []) {
+    if (action && trace?.action !== action) continue;
+    const candidate = parseTimestamp(trace?.timestamp);
+    if (!candidate) continue;
+    if (!latest || candidate > latest) latest = candidate;
+  }
+  return latest ? latest.toISOString() : null;
+}
+
+function parseTimestamp(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date;
+}
+
+function ensureRuntimeState(state) {
+  if (!state.runtime || typeof state.runtime !== 'object') {
+    state.runtime = {
+      observerStartedAt: null,
+      observerStoppedAt: null,
+      lastTraceAt: null,
+      monitorsRunning: false,
+      serviceStartCount: 0,
+    };
+  }
+  state.runtime.observerStartedAt = state.runtime.observerStartedAt || null;
+  state.runtime.observerStoppedAt = state.runtime.observerStoppedAt || null;
+  state.runtime.lastTraceAt = state.runtime.lastTraceAt || null;
+  state.runtime.monitorsRunning = state.runtime.monitorsRunning === true;
+  state.runtime.serviceStartCount = Number(state.runtime.serviceStartCount) || 0;
+  return state.runtime;
 }
 
 function updateDriveScores(state, trace) {

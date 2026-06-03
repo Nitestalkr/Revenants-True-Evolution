@@ -133,6 +133,13 @@ class DataStore {
     return {
       schemaVersion: '0.1.0',
       updatedAt: new Date().toISOString(),
+      runtime: {
+        observerStartedAt: null,
+        observerStoppedAt: null,
+        lastTraceAt: null,
+        monitorsRunning: false,
+        serviceStartCount: 0,
+      },
       cycleCount: 0,
       driveScores: {
         curiosity: 0.3,
