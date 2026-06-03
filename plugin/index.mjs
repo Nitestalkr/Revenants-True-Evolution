@@ -10,8 +10,15 @@ export default {
   description: 'Companion evolution layer for GNW/GRAO tracing, monitoring, and LibraVDB promotion signals.',
   register(api) {
     const pluginConfig = api.pluginConfig || {};
+    if (pluginConfig.enabled === false) {
+      api.logger?.info?.('revenants: plugin disabled by config.');
+      return;
+    }
+
+    const rootDir = resolvePluginRootDir(api, pluginConfig);
     const observer = createRevenantsObserver({
       pluginConfig,
+      rootDir,
       logger: api.logger,
     });
 
@@ -22,7 +29,10 @@ export default {
     if (pluginConfig.registerContextEngine === true && typeof api.registerContextEngine === 'function') {
       api.registerContextEngine('revenants', (ctx) => createRevenantsContextEngine({
         ...ctx,
-        pluginConfig,
+        pluginConfig: {
+          ...pluginConfig,
+          dataDir: rootDir,
+        },
         logger: api.logger,
       }));
       api.logger?.info?.('revenants: registered experimental context engine.');
@@ -31,6 +41,19 @@ export default {
     }
   },
 };
+
+function resolvePluginRootDir(api, pluginConfig) {
+  if (typeof pluginConfig.dataDir === 'string' && pluginConfig.dataDir.trim()) {
+    return pluginConfig.dataDir;
+  }
+
+  const stateDir = api?.runtime?.state?.resolveStateDir?.();
+  if (typeof stateDir === 'string' && stateDir.trim()) {
+    return `${stateDir.replace(/[\\/]+$/, '')}/revenants`;
+  }
+
+  return undefined;
+}
 
 function registerObserverService(api, observer) {
   if (typeof api.registerService === 'function') {

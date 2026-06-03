@@ -1,6 +1,7 @@
 'use strict';
 
 const path = require('path');
+const os = require('os');
 const DataStore = require('./data-store');
 const MonitorSuite = require('../monitors/monitor-suite');
 const { normalizeMessageTrace, normalizeTurnTrace } = require('./trace-normalizer');
@@ -14,7 +15,7 @@ class RevenantsContextEngine {
     this.ctx = ctx;
     this.rootDir = ctx.pluginConfig?.dataDir
       ? path.resolve(ctx.pluginConfig.dataDir)
-      : path.resolve(__dirname, '..');
+      : resolveDefaultRootDir();
     this.injectContext = ctx.pluginConfig?.injectContext !== false;
     this.startMonitors = ctx.pluginConfig?.startMonitors === true;
     this.store = new DataStore(this.rootDir);
@@ -175,8 +176,17 @@ function clamp(value) {
   return Math.max(0, Math.min(1, value));
 }
 
+function resolveDefaultRootDir() {
+  if (process.env.OPENCLAW_STATE_DIR) {
+    return path.resolve(process.env.OPENCLAW_STATE_DIR, 'revenants');
+  }
+
+  return path.join(os.tmpdir(), 'revenants');
+}
+
 module.exports = {
   RevenantsContextEngine,
   createRevenantsContextEngine,
   buildContextBlock,
+  resolveDefaultRootDir,
 };

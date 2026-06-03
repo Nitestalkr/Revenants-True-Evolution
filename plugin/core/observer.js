@@ -1,6 +1,7 @@
 'use strict';
 
 const path = require('path');
+const os = require('os');
 const DataStore = require('./data-store');
 const MonitorSuite = require('../monitors/monitor-suite');
 const { normalizeHookTrace, buildPromotion } = require('./trace-normalizer');
@@ -35,9 +36,11 @@ class RevenantsObserver {
     this.api = null;
     this.logger = ctx.logger || console;
     this.pluginConfig = ctx.pluginConfig || {};
-    this.rootDir = this.pluginConfig.dataDir
+    this.rootDir = ctx.rootDir
+      ? path.resolve(ctx.rootDir)
+      : this.pluginConfig.dataDir
       ? path.resolve(this.pluginConfig.dataDir)
-      : path.resolve(__dirname, '..');
+      : resolveDefaultRootDir();
     this.store = new DataStore(this.rootDir);
     this.suite = null;
     this.started = false;
@@ -46,6 +49,7 @@ class RevenantsObserver {
       : DEFAULT_HOOKS;
     this.registeredHooks = [];
     this.hooksAttached = false;
+    this.hookApiAvailable = true;
   }
 
   async start(api) {
@@ -65,6 +69,8 @@ class RevenantsObserver {
       impactScore: 0.3,
       metadata: {
         mode: this.pluginConfig.registerContextEngine === true ? 'context-engine-plus-observer' : 'companion-observer',
+        hookApiAvailable: this.hookApiAvailable,
+        registeredHookCount: this.registeredHooks.length,
       },
     });
 
@@ -84,20 +90,8 @@ class RevenantsObserver {
     this.hooksAttached = true;
 
     if (typeof api?.on !== 'function') {
+      this.hookApiAvailable = false;
       this.logger?.warn?.('revenants: OpenClaw hook API is unavailable; observer service will only expose status.');
-      this.recordTrace({
-        id: `revenants-hooks-unavailable-${Date.now()}`,
-        timestamp: new Date().toISOString(),
-        signalType: 'runtime',
-        source: 'revenants',
-        target: 'openclaw-runtime',
-        action: 'hooks_unavailable',
-        result: 'partial',
-        impactScore: 0.6,
-        metadata: {
-          reason: 'api.on missing',
-        },
-      });
       return;
     }
 
@@ -105,21 +99,6 @@ class RevenantsObserver {
       api.on(hookName, (event, hookContext) => this.recordHook(hookName, event, hookContext), { priority: -50 });
       this.registeredHooks.push(hookName);
     }
-
-    this.recordTrace({
-      id: `revenants-hooks-registered-${Date.now()}`,
-      timestamp: new Date().toISOString(),
-      signalType: 'runtime',
-      source: 'revenants',
-      target: 'openclaw-runtime',
-      action: 'hooks_registered',
-      result: 'success',
-      impactScore: 0.2,
-      metadata: {
-        count: this.registeredHooks.length,
-        hooks: this.registeredHooks,
-      },
-    });
   }
 
   startMonitorSuite() {
@@ -204,8 +183,17 @@ function clamp(value) {
   return Math.max(0, Math.min(1, value));
 }
 
+function resolveDefaultRootDir() {
+  if (process.env.OPENCLAW_STATE_DIR) {
+    return path.resolve(process.env.OPENCLAW_STATE_DIR, 'revenants');
+  }
+
+  return path.join(os.tmpdir(), 'revenants');
+}
+
 module.exports = {
   RevenantsObserver,
   createRevenantsObserver,
   DEFAULT_HOOKS,
+  resolveDefaultRootDir,
 };

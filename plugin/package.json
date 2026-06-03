@@ -11,6 +11,6 @@
     ]
   },
   "scripts": {
-    "test": "node ../tests/js/validate-monitor-suite.js && node ../tests/js/validate-context-engine.js && node ../tests/js/validate-companion-mode.js"
+    "test": "node ../tests/js/validate-monitor-suite.js && node ../tests/js/validate-context-engine.js && node ../tests/js/validate-companion-mode.js && node ../tests/js/validate-plugin-boundaries.js"
   }
 }
