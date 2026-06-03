@@ -8,8 +8,8 @@ export default {
   id: 'revenants',
   name: 'Revenants',
   description: 'Companion evolution layer for GNW/GRAO tracing, monitoring, and LibraVDB promotion signals.',
-  register(api) {
-    const pluginConfig = api.pluginConfig || {};
+  register(api, runtimeConfig) {
+    const pluginConfig = resolvePluginConfig(api, runtimeConfig);
     if (pluginConfig.enabled === false) {
       api.logger?.info?.('revenants: plugin disabled by config.');
       return;
@@ -47,6 +47,53 @@ export default {
     }
   },
 };
+
+function resolvePluginConfig(api, runtimeConfig) {
+  const candidates = [
+    readConfigSource(api?.config, api),
+    readConfigSource(api?.pluginConfig, api),
+    readConfigSource(api?.getConfig, api),
+    runtimeConfig,
+  ];
+
+  return candidates.reduce((merged, candidate) => {
+    const normalized = normalizePluginConfig(candidate);
+    return normalized ? { ...merged, ...normalized } : merged;
+  }, {});
+}
+
+function readConfigSource(source, receiver) {
+  if (!source) return null;
+
+  if (typeof source === 'function') {
+    return callConfigSource(source, receiver, 'revenants')
+      ?? callConfigSource(source, receiver);
+  }
+
+  if (typeof source.get === 'function') {
+    return callConfigSource(source.get, source, 'revenants')
+      ?? callConfigSource(source.get, source, 'plugins.revenants')
+      ?? callConfigSource(source.get, source);
+  }
+
+  return source;
+}
+
+function callConfigSource(fn, receiver, key) {
+  try {
+    return key === undefined ? fn.call(receiver) : fn.call(receiver, key);
+  } catch {
+    return null;
+  }
+}
+
+function normalizePluginConfig(config) {
+  if (!config || typeof config !== 'object' || Array.isArray(config)) return null;
+  if (config.revenants && typeof config.revenants === 'object' && !Array.isArray(config.revenants)) {
+    return { ...config, ...config.revenants };
+  }
+  return config;
+}
 
 function resolvePluginRootDir(api, pluginConfig) {
   if (typeof pluginConfig.dataDir === 'string' && pluginConfig.dataDir.trim()) {

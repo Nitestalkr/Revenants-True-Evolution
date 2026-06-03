@@ -10,10 +10,39 @@ async function main() {
 
   const disabledApi = createFakeApi({ enabled: false });
   plugin.register(disabledApi);
-  assert.strictEqual(disabledApi.services.length, 0, 'disabled plugin must not register services');
-  assert.strictEqual(disabledApi.tools.length, 0, 'disabled plugin must not register tools');
-  assert.strictEqual(disabledApi.contextEngines.length, 0, 'disabled plugin must not register context engines');
-  assert.deepStrictEqual(Object.keys(disabledApi.hooks), [], 'disabled plugin must not attach hooks');
+  assertDisabled(disabledApi, 'disabled pluginConfig');
+
+  const disabledNestedApi = createFakeApi({});
+  disabledNestedApi.pluginConfig = { revenants: { enabled: false } };
+  plugin.register(disabledNestedApi);
+  assertDisabled(disabledNestedApi, 'disabled nested pluginConfig');
+
+  const disabledConfigApi = createFakeApi({});
+  disabledConfigApi.pluginConfig = undefined;
+  disabledConfigApi.config = { enabled: false };
+  plugin.register(disabledConfigApi);
+  assertDisabled(disabledConfigApi, 'disabled api.config');
+
+  const disabledConfigGetterApi = createFakeApi({});
+  disabledConfigGetterApi.pluginConfig = undefined;
+  disabledConfigGetterApi.config = {
+    get(key) {
+      return key === 'revenants' ? { enabled: false } : null;
+    },
+  };
+  plugin.register(disabledConfigGetterApi);
+  assertDisabled(disabledConfigGetterApi, 'disabled api.config.get');
+
+  const disabledGetConfigApi = createFakeApi({});
+  disabledGetConfigApi.pluginConfig = undefined;
+  disabledGetConfigApi.getConfig = (key) => (key === 'revenants' ? { enabled: false } : null);
+  plugin.register(disabledGetConfigApi);
+  assertDisabled(disabledGetConfigApi, 'disabled api.getConfig');
+
+  const disabledRuntimeArgApi = createFakeApi({});
+  disabledRuntimeArgApi.pluginConfig = undefined;
+  plugin.register(disabledRuntimeArgApi, { enabled: false });
+  assertDisabled(disabledRuntimeArgApi, 'disabled register runtime config');
 
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'revenants-state-'));
   const api = createFakeApi({}, stateDir);
@@ -73,6 +102,13 @@ async function main() {
   }
 
   console.log('✓ plugin boundary validation passed');
+}
+
+function assertDisabled(api, label) {
+  assert.strictEqual(api.services.length, 0, `${label} must not register services`);
+  assert.strictEqual(api.tools.length, 0, `${label} must not register tools`);
+  assert.strictEqual(api.contextEngines.length, 0, `${label} must not register context engines`);
+  assert.deepStrictEqual(Object.keys(api.hooks), [], `${label} must not attach hooks`);
 }
 
 function snapshotDir(dir) {
