@@ -34,18 +34,25 @@ async function main() {
     error: 'timeout',
     durationMs: 1000,
   });
+  await api.hooks.after_tool_call({
+    sessionId: 's-1',
+    toolName: 'exec',
+    status: 'failed',
+    error: 'timeout',
+    durationMs: 1000,
+  });
 
   const statusResult = await api.tools[0].execute({ limit: 5 });
   const status = JSON.parse(statusResult.content[0].text);
 
   assert.strictEqual(status.mode, 'companion-observer');
   assert.ok(status.registeredHooks.includes('before_prompt_build'));
-  assert.strictEqual(status.state.counters.toolCallsObserved, 1);
-  assert.strictEqual(status.state.counters.toolFailuresObserved, 1);
+  assert.strictEqual(status.state.counters.toolCallsObserved, 2);
+  assert.strictEqual(status.state.counters.toolFailuresObserved, 2);
   assert.ok(status.recentTraces.some((trace) => trace.action === 'before_prompt_build'));
   assert.ok(!status.recentTraces.some((trace) => trace.sessionKey), 'status output should redact session keys by default');
   assert.ok(!status.recentTraces.some((trace) => trace.metadata?.channelId), 'status output should redact channel ids by default');
-  assert.ok(status.state.counters.promotionsQueued >= 1, 'failed tool trace should queue a promotion');
+  assert.ok(status.state.counters.promotionsQueued >= 1, 'clustered runtime failure should queue a promotion');
   assert.ok(status.queuedPromotions.some((promotion) => promotion.intent === 'stabilize-runtime'));
   assert.ok(status.state.grao.activeProposals.includes('stabilize-runtime'));
 

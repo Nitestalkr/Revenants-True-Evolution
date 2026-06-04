@@ -50,7 +50,18 @@ async function main() {
   }, {});
 
   queue = observer.reviewQueue('peek', { limit: 10 });
-  assert.strictEqual(queue.queuedCount, 2, 'different failure class should still queue a distinct proposal');
+  assert.strictEqual(queue.queuedCount, 1, 'single transient runtime failure should not queue a new proposal yet');
+
+  observer.recordHook('after_tool_call', {
+    sessionId: 's-3b',
+    sessionKey: 'agent:main:discord:channel:1473342935373447372',
+    toolName: 'web_fetch',
+    status: 'failed',
+    error: 'timeout contacting upstream',
+  }, {});
+
+  queue = observer.reviewQueue('peek', { limit: 10 });
+  assert.strictEqual(queue.queuedCount, 2, 'clustered runtime failure should queue a distinct proposal');
 
   const firstId = queue.recent[0].id;
   observer.reviewQueue('approve', {

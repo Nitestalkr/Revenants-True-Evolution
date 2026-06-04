@@ -54,6 +54,14 @@ async function main() {
       error: 'timeout',
       durationMs: 1200,
     }, {});
+    await api.hooks.after_tool_call({
+      sessionId: 's-1b',
+      sessionKey: 'agent:main:discord:channel:1473342935373447372',
+      toolName: 'exec',
+      status: 'failed',
+      error: 'timeout',
+      durationMs: 1200,
+    }, {});
 
     await delay(200);
 
