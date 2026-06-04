@@ -183,7 +183,7 @@ class RevenantsObserver {
       void this.notifyQueuedPromotion(promotion, trace);
     }
 
-    const autoWorkPromotion = this.maybeQueueAutoWork(trace);
+    const autoWorkPromotion = this.maybeQueueAutoWork(trace, { queuedPromotion: promotion });
     if (autoWorkPromotion) {
       void this.notifyQueuedPromotion(autoWorkPromotion, trace);
     }
@@ -439,7 +439,7 @@ class RevenantsObserver {
     return record;
   }
 
-  maybeQueueAutoWork(trace) {
+  maybeQueueAutoWork(trace, opts = {}) {
     if (!isAutoWorkEnabled(this.pluginConfig)) return null;
     if (!shouldEvaluateAutoWorkTrigger(trace)) return null;
 
@@ -460,6 +460,8 @@ class RevenantsObserver {
       store: this.store,
       state,
       trace,
+      pluginConfig: this.pluginConfig,
+      queuedPromotion: opts.queuedPromotion || null,
       recentEntries,
     });
 
@@ -484,6 +486,11 @@ class RevenantsObserver {
       metadata: {
         trigger: trace.action,
         status: candidate.kind,
+        toolName: candidate.toolName,
+        normalizedFailureClass: candidate.normalizedFailureClass,
+        clusterCount: candidate.clusterCount,
+        clusterWindowMs: candidate.clusterWindowMs,
+        linkedRuntimeProposalId: candidate.linkedRuntimeProposalId,
       },
     });
     this.store.updateState((nextState) => {
@@ -558,7 +565,19 @@ function redactPromotion(promotion) {
 }
 
 function redactMetadata(metadata) {
-  const allowed = ['toolName', 'modelId', 'provider', 'status', 'trigger', 'durationMs'];
+  const allowed = [
+    'toolName',
+    'modelId',
+    'provider',
+    'status',
+    'trigger',
+    'durationMs',
+    'normalizedFailureClass',
+    'clusterCount',
+    'clusterWindowMs',
+    'linkedRuntimeProposalId',
+    'sourceProposalId',
+  ];
   return Object.fromEntries(allowed
     .filter((key) => metadata[key] !== undefined)
     .map((key) => [key, metadata[key]]));
@@ -734,11 +753,15 @@ function passesAutoWorkQuiescenceGate(state, pluginConfig) {
   return (Date.now() - lastUserAt) >= minIdleMs;
 }
 
-function selectAutoWorkCandidate({ store, state, trace }) {
+function selectAutoWorkCandidate({ store, state, trace, pluginConfig, queuedPromotion }) {
   const queuedPromotions = store.readPromotions();
   const implementationTasks = store.readImplementationTasks(20);
   const recentFailures = Number(state?.counters?.toolFailuresObserved || 0);
   const failureThreshold = Number(state?.runtime?.serviceStartCount ? 3 : 3);
+  const failureCluster = describeFailureCluster(trace, store, pluginConfig);
+  const linkedRuntimePromotion = failureCluster
+    ? findRelatedRuntimePromotion(queuedPromotions, failureCluster)
+    : null;
 
   const candidates = [];
   const translatedFollowUp = [...queuedPromotions].reverse().find((entry) => (
@@ -774,16 +797,26 @@ function selectAutoWorkCandidate({ store, state, trace }) {
     });
   }
 
-  if (recentFailures >= failureThreshold) {
+  if (
+    failureCluster
+    && recentFailures >= failureThreshold
+    && !(queuedPromotion && queuedPromotion.proposalType === 'runtime')
+    && !linkedRuntimePromotion
+  ) {
     candidates.push({
-      key: `failure-cluster:${recentFailures}`,
+      key: `failure-cluster:${failureCluster.toolName || 'unknown'}:${failureCluster.normalizedFailureClass}:${failureCluster.clusterCount}`,
       kind: 'failure_cluster',
       rank: 0.74,
       impactScore: 0.76,
-      summary: `Investigate repeated runtime/tool failure pressure (${recentFailures} observed failures) before it compounds further.`,
+      summary: `Investigate repeated ${failureCluster.toolName || 'tool'} failures (${failureCluster.clusterCount} ${failureCluster.normalizedFailureClass} events in ${Math.round(failureCluster.clusterWindowMs / 60000)}m) before they compound further.`,
       details: 'Repeated failures remain a pressure source in the observer state and should be turned into a bounded follow-up task.',
       sourceProposalId: null,
       trigger: trace.action,
+      toolName: failureCluster.toolName,
+      normalizedFailureClass: failureCluster.normalizedFailureClass,
+      clusterCount: failureCluster.clusterCount,
+      clusterWindowMs: failureCluster.clusterWindowMs,
+      linkedRuntimeProposalId: queuedPromotion?.id || linkedRuntimePromotion?.id || null,
     });
   }
 
@@ -834,23 +867,58 @@ function buildAutoWorkPromotion(candidate, trace) {
         status: candidate.kind,
         trigger: candidate.trigger,
         sourceProposalId: candidate.sourceProposalId,
+        toolName: candidate.toolName,
+        normalizedFailureClass: candidate.normalizedFailureClass,
+        clusterCount: candidate.clusterCount,
+        clusterWindowMs: candidate.clusterWindowMs,
+        linkedRuntimeProposalId: candidate.linkedRuntimeProposalId,
       },
     },
     autoWorkCandidate: {
       kind: candidate.kind,
       key: candidate.key,
       details: candidate.details,
+      toolName: candidate.toolName,
+      normalizedFailureClass: candidate.normalizedFailureClass,
+      clusterCount: candidate.clusterCount,
+      clusterWindowMs: candidate.clusterWindowMs,
+      linkedRuntimeProposalId: candidate.linkedRuntimeProposalId,
     },
   };
 }
 
+function describeFailureCluster(trace, store, pluginConfig) {
+  if (trace?.signalType !== 'tooling' || trace?.result !== 'failure') return null;
+  const toolName = String(trace?.metadata?.toolName || '');
+  if (!toolName) return null;
+  const normalizedFailureClass = classifyRuntimeHandling(
+    trace?.metadata?.error || trace?.metadata?.status || '',
+  );
+  return {
+    toolName,
+    normalizedFailureClass,
+    clusterCount: countRecentFailureCluster(store, trace, pluginConfig),
+    clusterWindowMs: resolveFailureClusterWindowMs(pluginConfig),
+  };
+}
+
+function findRelatedRuntimePromotion(promotions, failureCluster) {
+  for (const entry of promotions || []) {
+    if (entry?.proposalType !== 'runtime') continue;
+    const toolName = String(entry?.evidence?.metadata?.toolName || '');
+    if (toolName !== String(failureCluster?.toolName || '')) continue;
+    const normalizedFailureClass = classifyRuntimeHandling(
+      entry?.evidence?.metadata?.error || entry?.evidence?.metadata?.status || '',
+    );
+    if (normalizedFailureClass !== failureCluster?.normalizedFailureClass) continue;
+    return entry;
+  }
+  return null;
+}
+
 function countRecentFailureCluster(store, trace, pluginConfig) {
   const traces = store.tailTraces(200);
-  const windowMs = Number(
-    pluginConfig?.failureClusterWindowMs
-      ?? pluginConfig?.autoWork?.failureClusterWindowMs
-      ?? 30 * 60 * 1000,
-  );
+  const windowMs = resolveFailureClusterWindowMs(pluginConfig);
   const handling = classifyRuntimeHandling(
     trace?.metadata?.error || trace?.metadata?.status || '',
   );
@@ -870,6 +938,14 @@ function countRecentFailureCluster(store, trace, pluginConfig) {
     if ((currentTime - timestamp) <= windowMs) count += 1;
   }
   return count;
+}
+
+function resolveFailureClusterWindowMs(pluginConfig) {
+  return Number(
+    pluginConfig?.failureClusterWindowMs
+      ?? pluginConfig?.autoWork?.failureClusterWindowMs
+      ?? 30 * 60 * 1000,
+  );
 }
 
 function thresholdForFailureHandling(handling, pluginConfig) {
@@ -961,6 +1037,17 @@ function formatProposalNotification(promotion, trace, route) {
     lines.push(`Suggested target: ${promotion.researchAssessment.suggestedMutationTarget}`);
   }
   if (trace?.metadata?.toolName) lines.push(`Tool: ${trace.metadata.toolName}`);
+  const clusterCount = Number(promotion?.evidence?.metadata?.clusterCount || 0);
+  if (clusterCount > 0) {
+    const clusterTool = promotion?.evidence?.metadata?.toolName || trace?.metadata?.toolName || 'unknown-tool';
+    const clusterClass = promotion?.evidence?.metadata?.normalizedFailureClass || 'unknown-failure-class';
+    const clusterWindowMs = Number(promotion?.evidence?.metadata?.clusterWindowMs || 0);
+    const clusterWindowMinutes = clusterWindowMs > 0 ? Math.round(clusterWindowMs / 60000) : null;
+    lines.push(`Cluster: ${clusterTool} / ${clusterClass} / ${clusterCount} events${clusterWindowMinutes ? ` in ${clusterWindowMinutes}m` : ''}`);
+    if (promotion?.evidence?.metadata?.linkedRuntimeProposalId) {
+      lines.push(`Linked runtime proposal: ${promotion.evidence.metadata.linkedRuntimeProposalId}`);
+    }
+  }
   lines.push('Review in chat with:');
   lines.push(`- \`revenants approve ${promotion.id}\``);
   lines.push(`- \`revenants reject ${promotion.id}\``);
