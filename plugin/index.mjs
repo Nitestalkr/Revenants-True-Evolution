@@ -6,6 +6,8 @@ const require = createRequire(import.meta.url);
 const { createRevenantsContextEngine } = require('./core/context-engine.js');
 const { createRevenantsObserver } = require('./core/observer.js');
 const execFileAsync = promisify(execFile);
+const OBSERVER_SINGLETONS = globalThis.__revenantsObserverSingletons || (globalThis.__revenantsObserverSingletons = new Map());
+const CHAT_BRIDGE_APIS = globalThis.__revenantsChatBridgeApis || (globalThis.__revenantsChatBridgeApis = new WeakSet());
 
 export default {
   id: 'revenants',
@@ -19,7 +21,7 @@ export default {
     }
 
     const rootDir = resolvePluginRootDir(api, pluginConfig);
-    const observer = createRevenantsObserver({
+    const observer = getSharedObserver({
       pluginConfig,
       rootDir,
       logger: api.logger,
@@ -31,6 +33,7 @@ export default {
     registerStatusTool(api, observer);
     registerReviewQueueTool(api, observer);
     registerReviewCommand(api, observer);
+    registerChatReviewBridge(api, observer, pluginConfig);
 
     if (
       pluginConfig.registerContextEngine === true
@@ -53,6 +56,21 @@ export default {
     }
   },
 };
+
+function getSharedObserver(ctx) {
+  const key = String(ctx.rootDir || 'default');
+  let observer = OBSERVER_SINGLETONS.get(key);
+  if (!observer) {
+    observer = createRevenantsObserver(ctx);
+    OBSERVER_SINGLETONS.set(key, observer);
+    return observer;
+  }
+
+  observer.pluginConfig = { ...observer.pluginConfig, ...ctx.pluginConfig };
+  observer.logger = ctx.logger || observer.logger;
+  if (typeof ctx.proposalNotifier === 'function') observer.proposalNotifier = ctx.proposalNotifier;
+  return observer;
+}
 
 function resolvePluginConfig(api, runtimeConfig) {
   const candidates = [
@@ -217,54 +235,45 @@ function registerReviewCommand(api, observer) {
     acceptsArgs: true,
     requireAuth: true,
     handler: async (ctx) => {
-      const raw = String(ctx.args || '').trim();
-      const [subcommand = 'help', firstArg, ...rest] = raw.split(/\s+/).filter(Boolean);
-
-      if (subcommand === 'queue' || subcommand === 'status') {
-        const result = observer.reviewQueue('peek', { limit: 5 });
-        return {
-          text: formatQueueSummary(result),
-        };
-      }
-
-      if (subcommand === 'approve' || subcommand === 'reject' || subcommand === 'defer') {
-        if (!firstArg) {
-          return {
-            text: `Missing proposal id. Try \`revenants ${subcommand} <proposal-id>\`.`,
-            isError: true,
-          };
-        }
-
-        const note = rest.join(' ').trim() || undefined;
-        const result = observer.reviewQueue(subcommand, {
-          ids: [firstArg],
-          reviewer: ctx.senderId || ctx.sessionKey || 'chat-reviewer',
-          note,
-        });
-
-        if (result.acknowledgedCount === 0) {
-          return {
-            text: `No queued proposal matched \`${firstArg}\`. Try \`revenants queue\`.`,
-            isError: true,
-          };
-        }
-
-        return {
-          text: `Revenants ${decisionVerb(subcommand)} \`${firstArg}\`. Remaining queued: ${result.remainingCount}.`,
-        };
-      }
-
-      return {
-        text: [
-          'Revenants review commands:',
-          '- `revenants queue`',
-          '- `revenants approve <proposal-id>`',
-          '- `revenants reject <proposal-id>`',
-          '- `revenants defer <proposal-id>`',
-        ].join('\n'),
-      };
+      return handleReviewCommand(observer, {
+        raw: ctx.args,
+        senderId: ctx.senderId,
+        sessionKey: ctx.sessionKey,
+      });
     },
   });
+}
+
+function registerChatReviewBridge(api, observer, pluginConfig) {
+  if (typeof api?.on !== 'function') return;
+  if (CHAT_BRIDGE_APIS.has(api)) return;
+  CHAT_BRIDGE_APIS.add(api);
+
+  const sendReply = createSessionReplySender(api, pluginConfig);
+
+  api.on('message_received', async (event = {}, hookContext = {}) => {
+    const command = parseChatReviewCommand(event, hookContext);
+    if (!command) return;
+
+    const result = handleReviewCommand(observer, {
+      raw: command.args,
+      senderId: event?.senderId || hookContext?.senderId,
+      sessionKey: event?.sessionKey || hookContext?.sessionKey,
+    });
+
+    if (!result?.text) return;
+
+    await sendReply({
+      route: {
+        channel: event?.channel || event?.sourceChannel || hookContext?.channel || hookContext?.sourceChannel,
+        target: routeTargetFromEvent(event, hookContext),
+        accountId: event?.accountId || hookContext?.accountId,
+        threadId: event?.threadId || hookContext?.threadId,
+        replyToId: event?.messageId || hookContext?.messageId,
+      },
+      message: result.text,
+    });
+  }, { priority: -40 });
 }
 
 function decisionVerb(action) {
@@ -277,7 +286,8 @@ function decisionVerb(action) {
 function formatQueueSummary(result) {
   const lines = [`Queued proposals: ${result.queuedCount}`];
   for (const proposal of (result.recent || []).slice(-5).reverse()) {
-    lines.push(`- ${proposal.id} | ${proposal.intent} | ${proposal.summary}`);
+    const route = proposal.proposalType ? ` | ${proposal.proposalType} -> ${proposal.mutationTarget}` : '';
+    lines.push(`- ${proposal.id} | ${proposal.intent}${route} | ${proposal.summary}`);
   }
   if ((result.recent || []).length === 0) {
     lines.push('- none');
@@ -287,7 +297,10 @@ function formatQueueSummary(result) {
 
 function createProposalNotifier(api, pluginConfig) {
   if (pluginConfig.notifySessionOnProposal === false) return null;
+  return createSessionReplySender(api, pluginConfig, { logPrefix: 'revenants: notified' });
+}
 
+function createSessionReplySender(api, pluginConfig, opts = {}) {
   return async ({ route, message }) => {
     if (!route?.channel || !route?.target || !message) return;
     const args = [
@@ -309,6 +322,93 @@ function createProposalNotifier(api, pluginConfig) {
       timeout: Number(pluginConfig.proposalNotifyTimeoutMs) || 15000,
       env: process.env,
     });
-    api.logger?.info?.(`revenants: notified ${route.channel}:${route.target} about queued proposal.`);
+
+    if (opts.logPrefix) api.logger?.info?.(`${opts.logPrefix} ${route.channel}:${route.target}.`);
   };
+}
+
+function parseChatReviewCommand(event = {}, hookContext = {}) {
+  const content = String(event?.content || hookContext?.content || '').trim();
+  if (!content) return null;
+  const normalized = content.replace(/^<@!?\d+>\s*/u, '').trim();
+  const match = normalized.match(/(?:^|\s)revenants(?:\s+(.*))?$/i);
+  if (!match) return null;
+  return {
+    args: String(match[1] || '').trim(),
+  };
+}
+
+function handleReviewCommand(observer, ctx = {}) {
+  const raw = String(ctx.raw || '').trim();
+  const [subcommand = 'help', firstArg, ...rest] = raw.split(/\s+/).filter(Boolean);
+
+  if (subcommand === 'queue' || subcommand === 'status' || subcommand === 'help') {
+    const result = observer.reviewQueue('peek', { limit: 5 });
+    return {
+      text: subcommand === 'help'
+        ? [
+          'Revenants review commands:',
+          '- `revenants queue`',
+          '- `revenants approve <proposal-id>`',
+          '- `revenants reject <proposal-id>`',
+          '- `revenants defer <proposal-id>`',
+        ].join('\n')
+        : formatQueueSummary(result),
+    };
+  }
+
+  if (subcommand === 'approve' || subcommand === 'reject' || subcommand === 'defer') {
+    if (!firstArg) {
+      return {
+        text: `Missing proposal id. Try \`revenants ${subcommand} <proposal-id>\`.`,
+        isError: true,
+      };
+    }
+
+    const note = rest.join(' ').trim() || undefined;
+    const result = observer.reviewQueue(subcommand, {
+      ids: [firstArg],
+      reviewer: ctx.senderId || ctx.sessionKey || 'chat-reviewer',
+      note,
+    });
+
+    if (result.acknowledgedCount === 0) {
+      return {
+        text: `No queued proposal matched \`${firstArg}\`. Try \`revenants queue\`.`,
+        isError: true,
+      };
+    }
+
+    return {
+      text: formatReviewDecisionReply(subcommand, result),
+    };
+  }
+
+  return {
+    text: [
+      'Revenants review commands:',
+      '- `revenants queue`',
+      '- `revenants approve <proposal-id>`',
+      '- `revenants reject <proposal-id>`',
+      '- `revenants defer <proposal-id>`',
+    ].join('\n'),
+  };
+}
+
+function formatReviewDecisionReply(action, result) {
+  const reviewed = result?.recentReviewed?.[0];
+  const route = reviewed?.proposalType
+    ? ` Routed as ${reviewed.proposalType} -> ${reviewed.mutationTarget} via ${reviewed.applyMode}.`
+    : '';
+  const application = result?.appliedMutations?.[0];
+  const applySummary = application?.details ? ` ${application.details}` : '';
+  return `Revenants ${decisionVerb(action)} \`${reviewed?.id || 'proposal'}\`. Remaining queued: ${result.remainingCount}.${route}${applySummary}`;
+}
+
+function routeTargetFromEvent(event = {}, hookContext = {}) {
+  const channelId = event?.channelId || hookContext?.channelId;
+  const userId = event?.userId || event?.dmUserId || hookContext?.userId || hookContext?.dmUserId;
+  if (channelId) return `channel:${channelId}`;
+  if (userId) return `user:${userId}`;
+  return null;
 }

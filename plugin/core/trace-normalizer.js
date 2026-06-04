@@ -68,18 +68,19 @@ function normalizeHookTrace({ hookName, event, hookContext, source = 'openclaw-h
     timestamp: new Date().toISOString(),
     sessionId,
     sessionKey,
-    signalType: signalTypeForHook(action),
+    signalType: signalTypeForHook(action, event, ctx),
     source,
     target: sessionKey || sessionId || 'openclaw-runtime',
     action,
     result,
-    impactScore: impactForHook(action, failed),
+    impactScore: impactForHook(action, failed, event, ctx),
     metadata: compactHookMetadata(event, ctx, toolName, error),
   };
 }
 
 function buildPromotion(trace) {
-  return {
+  const route = routePromotion(trace);
+  const promotion = {
     id: makeId('promotion', trace.id),
     timestamp: new Date().toISOString(),
     traceId: trace.id,
@@ -89,12 +90,23 @@ function buildPromotion(trace) {
     intent: promotionIntent(trace),
     impactScore: trace.impactScore,
     summary: promotionSummary(trace),
+    proposalType: route.type,
+    mutationTarget: route.target,
+    applyMode: route.applyMode,
+    validationRequired: route.validationRequired,
+    autoApplyEligible: route.autoApplyEligible,
+    mutationPlan: {
+      rationale: route.rationale,
+      summary: route.summary,
+    },
     evidence: {
       action: trace.action,
       result: trace.result,
       metadata: trace.metadata,
     },
   };
+  if (route.researchAssessment) promotion.researchAssessment = route.researchAssessment;
+  return promotion;
 }
 
 function collectToolStats(messages) {
@@ -129,7 +141,9 @@ function makeId(...parts) {
   return crypto.createHash('sha1').update(parts.join('\0')).digest('hex').slice(0, 16);
 }
 
-function signalTypeForHook(hookName) {
+function signalTypeForHook(hookName, event, ctx) {
+  const alertType = String(event?.type || ctx?.type || '');
+  if (/arxiv|paper|research/i.test(alertType)) return 'research';
   if (/tool/i.test(hookName)) return 'tooling';
   if (/session|agent|model/i.test(hookName)) return 'agent';
   if (/message/i.test(hookName)) return 'user_interaction';
@@ -137,7 +151,9 @@ function signalTypeForHook(hookName) {
   return 'runtime';
 }
 
-function impactForHook(hookName, failed) {
+function impactForHook(hookName, failed, event, ctx) {
+  const alertType = String(event?.type || ctx?.type || '');
+  if (/arxiv|paper|research/i.test(alertType)) return 0.82;
   if (failed) return 0.8;
   if (/tool/i.test(hookName)) return 0.5;
   if (/agent_end|session_end|model_call_ended/i.test(hookName)) return 0.4;
@@ -156,7 +172,111 @@ function promotionSummary(trace) {
   return `${trace.action}${tool} completed with ${trace.result}`;
 }
 
+function routePromotion(trace) {
+  const signalType = String(trace?.signalType || 'runtime');
+  const action = String(trace?.action || '');
+  const result = String(trace?.result || '');
+  const metadata = trace?.metadata || {};
+  const errorText = String(metadata.error || metadata.status || '').toLowerCase();
+
+  if (signalType === 'memory') {
+    return {
+      type: 'memory',
+      target: 'MEMORY.md',
+      applyMode: 'memory-update',
+      validationRequired: ['human-review'],
+      autoApplyEligible: false,
+      rationale: 'Context and memory signals are safest to capture as durable memory rather than runtime mutation.',
+      summary: 'Update durable memory/context notes with the learned signal.',
+    };
+  }
+
+  if (signalType === 'research' || /research|arxiv/i.test(action) || /arxiv|paper|research/i.test(String(trace?.source || ''))) {
+    return {
+      type: 'research',
+      target: 'research-review',
+      applyMode: 'proposal-only',
+      validationRequired: ['human-review', 'source-check'],
+      autoApplyEligible: false,
+      rationale: 'Research-origin signals should stay reviewable until a human chooses the right downstream mutation target.',
+      summary: 'Keep as a research proposal until translated into policy, config, or implementation work.',
+      researchAssessment: buildResearchAssessment(trace),
+    };
+  }
+
+  if (signalType === 'runtime' || /gateway|plugin_start|plugin_stop|monitor/i.test(action)) {
+    return {
+      type: 'runtime',
+      target: 'runtime-config',
+      applyMode: 'config-patch',
+      validationRequired: ['schema', 'rollback', 'human-review'],
+      autoApplyEligible: false,
+      rationale: 'Runtime stability signals should route through validated operational config changes.',
+      summary: 'Prepare a validated runtime/config patch with rollback safety.',
+    };
+  }
+
+  if (signalType === 'tooling') {
+    if (/blocked|denied|unauthor|private|forbidden|policy/i.test(errorText)) {
+      return {
+        type: 'policy',
+        target: 'AGENTS.md',
+        applyMode: 'doc-patch',
+        validationRequired: ['human-review'],
+        autoApplyEligible: false,
+        rationale: 'Policy-shaped tool failures should become operator guidance instead of unsafe low-level mutation.',
+        summary: 'Patch AGENTS.md with safer handling and escalation guidance for this failure class.',
+      };
+    }
+
+    if (result === 'failure' || result === 'partial') {
+      return {
+        type: 'runtime',
+        target: 'runtime-config',
+        applyMode: 'config-patch',
+        validationRequired: ['schema', 'rollback', 'human-review'],
+        autoApplyEligible: false,
+        rationale: 'Operational tool failures map best to validated runtime tuning before code mutation.',
+        summary: 'Prepare a validated runtime/config change to reduce repeated tool failures.',
+      };
+    }
+
+    return {
+      type: 'tooling',
+      target: 'TOOLS.md',
+      applyMode: 'doc-patch',
+      validationRequired: ['human-review'],
+      autoApplyEligible: false,
+      rationale: 'Tooling improvements are safest when recorded as operator/tool usage guidance first.',
+      summary: 'Patch TOOLS.md with improved tool usage guidance or enhancement notes.',
+    };
+  }
+
+  if (/persona|style|tone|voice|identity|soul/i.test(action)) {
+    return {
+      type: 'personality',
+      target: 'SOUL.md',
+      applyMode: 'doc-patch',
+      validationRequired: ['human-review'],
+      autoApplyEligible: false,
+      rationale: 'Identity and tone changes belong in the persona layer rather than runtime config.',
+      summary: 'Patch SOUL.md with the approved personality or tone adjustment.',
+    };
+  }
+
+  return {
+    type: 'implementation',
+    target: 'implementation-task',
+    applyMode: 'task',
+    validationRequired: ['human-review'],
+    autoApplyEligible: false,
+    rationale: 'Unclassified proposals should default to explicit engineering follow-up instead of silent mutation.',
+    summary: 'Convert the approved proposal into an implementation task.',
+  };
+}
+
 function compactHookMetadata(event, ctx, toolName, error) {
+  const paper = event?.paper || ctx?.paper;
   const metadata = {
     toolName,
     modelId: event?.modelId || event?.model || event?.request?.model || ctx?.modelId || ctx?.model || ctx?.request?.model,
@@ -172,9 +292,93 @@ function compactHookMetadata(event, ctx, toolName, error) {
     agentId: event?.agentId || ctx?.agentId,
     durationMs: event?.durationMs || event?.elapsedMs || event?.timing?.durationMs || ctx?.durationMs || ctx?.elapsedMs || ctx?.timing?.durationMs,
     tokenUsage: event?.usage || event?.result?.usage || ctx?.usage || ctx?.result?.usage,
+    alertType: event?.type || ctx?.type,
   };
+  if (paper) metadata.paper = compactPaperMetadata(paper);
   if (error) metadata.error = safeString(error);
   return Object.fromEntries(Object.entries(metadata).filter(([, value]) => value !== undefined));
+}
+
+function compactPaperMetadata(paper) {
+  return {
+    id: paper?.id,
+    title: safeString(paper?.title).slice(0, 240),
+    published: paper?.published || null,
+    authors: Array.isArray(paper?.authors) ? paper.authors.slice(0, 5) : [],
+    summary: safeString(paper?.summary || '').slice(0, 600),
+  };
+}
+
+function buildResearchAssessment(trace) {
+  const paper = trace?.metadata?.paper || {};
+  const title = String(paper?.title || '').toLowerCase();
+  const summary = String(paper?.summary || '').toLowerCase();
+  const combined = `${title} ${summary}`;
+  const cognitiveScore = scoreKeywordHits(combined, [
+    'global workspace',
+    'global neuronal workspace',
+    'attention schema',
+    'predictive coding',
+    'free energy',
+    'cognitive architecture',
+    'working memory',
+    'agent',
+  ]);
+  const implementationScore = scoreKeywordHits(combined, [
+    'benchmark',
+    'framework',
+    'system',
+    'pipeline',
+    'evaluation',
+    'architecture',
+    'agentic',
+    'tool use',
+  ]);
+  const novelty = clamp01(0.45 + (cognitiveScore * 0.08) + (implementationScore * 0.05));
+  const confidence = clamp01(0.5 + (cognitiveScore * 0.06) + (paper?.published ? 0.08 : 0));
+  return {
+    sourcePaper: {
+      id: paper?.id || null,
+      title: paper?.title || null,
+      published: paper?.published || null,
+      authors: Array.isArray(paper?.authors) ? paper.authors.slice(0, 5) : [],
+    },
+    confidence: round2(confidence),
+    novelty: round2(novelty),
+    expectedImpact: pickExpectedImpact(novelty, implementationScore, cognitiveScore),
+    suggestedMutationTarget: pickResearchTarget(combined, implementationScore, cognitiveScore),
+  };
+}
+
+function pickResearchTarget(text, implementationScore, cognitiveScore) {
+  if (implementationScore >= 2 || cognitiveScore >= 3) return 'implementation-task';
+  if (/policy|safety|governance|alignment|constitutional/.test(text)) return 'AGENTS.md';
+  if (/prompt|instruction|reasoning strategy|reflection/.test(text)) return 'AGENTS.md';
+  if (/tool use|tools|instrumentation|workflow|orchestration/.test(text)) return 'TOOLS.md';
+  if (/persona|personality|style|identity/.test(text)) return 'SOUL.md';
+  return 'research-review';
+}
+
+function pickExpectedImpact(novelty, implementationScore, cognitiveScore) {
+  if (novelty >= 0.8 || implementationScore >= 3) return 'high';
+  if (novelty >= 0.6 || cognitiveScore >= 2) return 'medium';
+  return 'low';
+}
+
+function scoreKeywordHits(text, keywords) {
+  let score = 0;
+  for (const keyword of keywords) {
+    if (text.includes(keyword)) score += 1;
+  }
+  return score;
+}
+
+function clamp01(value) {
+  return Math.max(0, Math.min(1, Number(value) || 0));
+}
+
+function round2(value) {
+  return Math.round((Number(value) || 0) * 100) / 100;
 }
 
 function stableSummary(value) {
@@ -198,4 +402,5 @@ module.exports = {
   normalizeHookTrace,
   buildPromotion,
   collectToolStats,
+  routePromotion,
 };

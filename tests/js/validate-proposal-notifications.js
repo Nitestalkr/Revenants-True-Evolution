@@ -72,6 +72,8 @@ async function main() {
     const message = sentArgs[messageFlagIndex + 1];
     assert.ok(message.includes('Revenants proposal queued'), 'proposal notification should announce queued proposal');
     assert.ok(message.includes('revenants approve'), 'proposal notification should include in-chat approval guidance');
+    assert.ok(message.includes('Type: runtime -> runtime-config'), 'proposal notification should include typed routing');
+    assert.ok(message.includes('Apply path:'), 'proposal notification should include apply-path summary');
 
     const queueReply = await api.commands.revenants.handler({
       args: 'queue',
@@ -84,6 +86,8 @@ async function main() {
     const peek = JSON.parse((await statusTool.execute({ action: 'peek', limit: 5 })).content[0].text);
     const proposalId = peek.recent[0]?.id;
     assert.ok(proposalId, 'queued proposal should be discoverable');
+    assert.strictEqual(peek.recent[0]?.proposalType, 'runtime');
+    assert.strictEqual(peek.recent[0]?.mutationTarget, 'runtime-config');
 
     const approveReply = await api.commands.revenants.handler({
       args: `approve ${proposalId}`,
@@ -91,6 +95,7 @@ async function main() {
       sessionKey: 'agent:main:discord:channel:1473342935373447372',
     });
     assert.ok(approveReply.text.includes(`\`${proposalId}\``), 'approve command should confirm the reviewed proposal');
+    assert.ok(approveReply.text.includes('Routed as runtime -> runtime-config via config-patch.'), 'approve command should surface the route');
 
     const afterApprove = JSON.parse((await statusTool.execute({ action: 'peek', limit: 5 })).content[0].text);
     assert.strictEqual(afterApprove.queuedCount, 0, 'approved proposal should be removed from queue');
@@ -128,7 +133,15 @@ function createFakeApi(pluginConfig) {
       this.contextEngines.push({ id, factory });
     },
     on(name, handler) {
-      this.hooks[name] = handler;
+      const existing = this.hooks[name];
+      if (!existing) {
+        this.hooks[name] = handler;
+        return;
+      }
+      this.hooks[name] = async (...args) => {
+        await existing(...args);
+        return handler(...args);
+      };
     },
   };
 }

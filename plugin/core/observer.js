@@ -1,5 +1,7 @@
 'use strict';
 
+const fs = require('fs');
+const path = require('path');
 const DataStore = require('./data-store');
 const MonitorSuite = require('../monitors/monitor-suite');
 const { normalizeHookTrace, buildPromotion } = require('./trace-normalizer');
@@ -37,18 +39,21 @@ class RevenantsObserver {
     this.pluginConfig = ctx.pluginConfig || {};
     this.proposalNotifier = typeof ctx.proposalNotifier === 'function' ? ctx.proposalNotifier : null;
     this.rootDir = resolveRuntimeRoot({ ...this.pluginConfig, dataDir: ctx.rootDir || this.pluginConfig.dataDir });
+    this.mutationRoot = resolveMutationRoot(this.rootDir, this.pluginConfig);
     this.store = new DataStore(this.rootDir);
     this.suite = null;
     this.started = false;
+    this.startRefCount = 0;
     this.hookNames = Array.isArray(this.pluginConfig.hooks)
       ? this.pluginConfig.hooks
       : DEFAULT_HOOKS;
-    this.registeredHooks = [];
-    this.hooksAttached = false;
+    this.registeredHooks = new Set();
+    this.attachedApis = new WeakSet();
     this.hookApiAvailable = true;
   }
 
   async start(api) {
+    this.startRefCount += 1;
     if (this.started) return;
     this.api = api;
     this.store.ensure();
@@ -66,7 +71,7 @@ class RevenantsObserver {
       metadata: {
         mode: this.pluginConfig.registerContextEngine === true ? 'context-engine-plus-observer' : 'companion-observer',
         hookApiAvailable: this.hookApiAvailable,
-        registeredHookCount: this.registeredHooks.length,
+        registeredHookCount: this.registeredHooks.size,
       },
     });
 
@@ -74,6 +79,8 @@ class RevenantsObserver {
   }
 
   async stop() {
+    this.startRefCount = Math.max(0, this.startRefCount - 1);
+    if (this.startRefCount > 0) return;
     if (this.started) {
       this.recordTrace({
         id: `revenants-stop-${Date.now()}`,
@@ -85,7 +92,7 @@ class RevenantsObserver {
         result: 'success',
         impactScore: 0.1,
         metadata: {
-          registeredHookCount: this.registeredHooks.length,
+          registeredHookCount: this.registeredHooks.size,
         },
       });
     }
@@ -102,8 +109,9 @@ class RevenantsObserver {
   }
 
   registerHooks(api) {
-    if (this.hooksAttached) return;
-    this.hooksAttached = true;
+    if (!api || typeof api !== 'object') return;
+    if (this.attachedApis.has(api)) return;
+    this.attachedApis.add(api);
 
     if (typeof api?.on !== 'function') {
       this.hookApiAvailable = false;
@@ -113,7 +121,7 @@ class RevenantsObserver {
 
     for (const hookName of this.hookNames) {
       api.on(hookName, (event, hookContext) => this.recordHook(hookName, event, hookContext), { priority: -50 });
-      this.registeredHooks.push(hookName);
+      this.registeredHooks.add(hookName);
     }
   }
 
@@ -144,8 +152,11 @@ class RevenantsObserver {
     let promotion = null;
 
     if (this.shouldPromote(trace)) {
-      promotion = buildPromotion(trace);
-      this.store.appendPromotion(promotion);
+      const candidate = buildPromotion(trace);
+      if (this.shouldQueuePromotion(candidate)) {
+        promotion = candidate;
+        this.store.appendPromotion(promotion);
+      }
     }
 
     this.store.updateState((state) => {
@@ -172,6 +183,28 @@ class RevenantsObserver {
     return Number(trace.impactScore || 0) >= Number(this.pluginConfig.proposalMinImpact ?? this.pluginConfig.promotionMinImpact ?? 0.7);
   }
 
+  shouldQueuePromotion(promotion) {
+    const cooldownMs = Number(this.pluginConfig.proposalCooldownMs ?? 10 * 60 * 1000);
+    if (!Number.isFinite(cooldownMs) || cooldownMs <= 0) return true;
+
+    const signature = promotionSignature(promotion);
+    const recentEntries = [
+      ...this.store.readPromotions(),
+      ...this.store.readReviewedPromotions(100),
+      ...this.store.readAppliedMutations(100),
+    ];
+
+    for (const entry of recentEntries) {
+      if (promotionSignature(entry) !== signature) continue;
+      const timestamp = entry.reviewedAt || entry.appliedAt || entry.timestamp;
+      if (!timestamp) continue;
+      const ageMs = Date.now() - new Date(timestamp).getTime();
+      if (Number.isFinite(ageMs) && ageMs >= 0 && ageMs < cooldownMs) return false;
+    }
+
+    return true;
+  }
+
   getStatus(limit = 10, opts = {}) {
     const raw = opts.includeRaw === true && this.pluginConfig.allowRawStatus === true;
     const state = this.store.readState();
@@ -186,7 +219,7 @@ class RevenantsObserver {
       mode: this.pluginConfig.registerContextEngine === true ? 'context-engine-plus-observer' : 'companion-observer',
       started: runtime.started,
       monitorsRunning: runtime.monitorsRunning,
-      registeredHooks: this.registeredHooks,
+      registeredHooks: [...this.registeredHooks],
       state,
       recentTraces,
       queuedPromotions: this.store.tailPromotions(limit),
@@ -205,6 +238,12 @@ class RevenantsObserver {
         note: opts.note,
         decision,
       }, { retain });
+      const appliedMutations = decision === 'approve'
+        ? result.acknowledged.map((promotion) => this.applyApprovedPromotion(promotion, {
+          reviewer: opts.reviewer || 'agent',
+          note: opts.note,
+        }))
+        : [];
 
       this.store.updateState((state) => {
         const remainingPromotions = this.store.readPromotions();
@@ -222,6 +261,7 @@ class RevenantsObserver {
         acknowledgedCount: result.acknowledged.length,
         acknowledgedIds: result.acknowledged.map((promotion) => promotion.id),
         remainingCount: result.remaining,
+        appliedMutations,
         recentReviewed: result.acknowledged.slice(-limit).map(redactPromotion),
       };
     }
@@ -270,6 +310,110 @@ class RevenantsObserver {
       this.logger?.warn?.(`revenants: proposal notification failed: ${error?.message || error}`);
     }
   }
+
+  applyApprovedPromotion(promotion, meta = {}) {
+    const appliedAt = new Date().toISOString();
+    const baseRecord = {
+      proposalId: promotion.id,
+      proposalType: promotion.proposalType,
+      mutationTarget: promotion.mutationTarget,
+      applyMode: promotion.applyMode,
+      appliedAt,
+      reviewer: meta.reviewer || 'agent',
+      note: meta.note || null,
+      status: 'noop',
+      details: null,
+    };
+
+    if (promotion.proposalType === 'research' || promotion.applyMode === 'proposal-only') {
+      const followUp = createTranslatedResearchPromotion(promotion, appliedAt);
+      this.store.appendPromotion(followUp);
+      this.store.appendTrace({
+        id: `${followUp.id}-trace`,
+        timestamp: appliedAt,
+        signalType: 'research',
+        source: 'revenants',
+        target: followUp.mutationTarget,
+        action: 'research_translation',
+        result: 'success',
+        impactScore: followUp.impactScore,
+        metadata: {
+          sourceProposalId: promotion.id,
+          suggestedMutationTarget: promotion?.researchAssessment?.suggestedMutationTarget || null,
+        },
+      });
+      void this.notifyQueuedPromotion(followUp, {
+        sessionKey: this.store.readState()?.notifications?.sentPromotions?.[promotion.id]?.sessionKey || null,
+        metadata: {
+          sourceProposalId: promotion.id,
+        },
+      });
+      const record = {
+        ...baseRecord,
+        status: 'translated',
+        details: `Queued translated follow-up proposal ${followUp.id} for ${followUp.mutationTarget}.`,
+        translatedProposalId: followUp.id,
+      };
+      this.store.appendAppliedMutation(record);
+      return record;
+    }
+
+    if (promotion.applyMode === 'config-patch') {
+      const runtimeConfig = this.store.readRuntimeConfig();
+      const toolName = promotion?.evidence?.metadata?.toolName || 'unknown-tool';
+      const error = String(promotion?.evidence?.metadata?.error || promotion?.evidence?.metadata?.status || 'unspecified failure');
+      runtimeConfig.toolPolicies[toolName] = {
+        lastUpdatedAt: appliedAt,
+        sourceProposalId: promotion.id,
+        recommendedHandling: classifyRuntimeHandling(error),
+        reason: promotion.summary,
+      };
+      runtimeConfig.appliedProposals[promotion.id] = {
+        appliedAt,
+        target: promotion.mutationTarget,
+      };
+      this.store.writeRuntimeConfig(runtimeConfig);
+      const record = {
+        ...baseRecord,
+        status: 'applied',
+        details: `Updated runtime-config policy for ${toolName}.`,
+      };
+      this.store.appendAppliedMutation(record);
+      return record;
+    }
+
+    if (promotion.applyMode === 'doc-patch' || promotion.applyMode === 'memory-update') {
+      const targetPath = resolveMutationTargetPath(this.mutationRoot, promotion.mutationTarget);
+      ensureParentDir(targetPath);
+      if (!fs.existsSync(targetPath)) {
+        fs.writeFileSync(targetPath, defaultDocumentBody(promotion.mutationTarget));
+      }
+      fs.appendFileSync(targetPath, renderMutationEntry(promotion, appliedAt));
+      const record = {
+        ...baseRecord,
+        status: 'applied',
+        details: `Appended mutation guidance to ${promotion.mutationTarget}.`,
+      };
+      this.store.appendAppliedMutation(record);
+      return record;
+    }
+
+    const taskPath = path.join(this.rootDir, 'data', 'implementation-tasks.jsonl');
+    fs.appendFileSync(taskPath, `${JSON.stringify({
+      proposalId: promotion.id,
+      createdAt: appliedAt,
+      summary: promotion.summary,
+      mutationTarget: promotion.mutationTarget,
+      evidence: promotion.evidence,
+    })}\n`);
+    const record = {
+      ...baseRecord,
+      status: 'applied',
+      details: 'Queued implementation task from approved proposal.',
+    };
+    this.store.appendAppliedMutation(record);
+    return record;
+  }
 }
 
 function redactStatus(status) {
@@ -302,6 +446,22 @@ function redactPromotion(promotion) {
     source: promotion.source,
     target: 'libravdb-review-queue',
     intent: promotion.intent,
+    proposalType: promotion.proposalType,
+    mutationTarget: promotion.mutationTarget,
+    applyMode: promotion.applyMode,
+    validationRequired: Array.isArray(promotion.validationRequired) ? promotion.validationRequired : [],
+    autoApplyEligible: promotion.autoApplyEligible === true,
+    mutationPlan: promotion.mutationPlan ? {
+      rationale: promotion.mutationPlan.rationale,
+      summary: promotion.mutationPlan.summary,
+    } : undefined,
+    researchAssessment: promotion.researchAssessment ? {
+      sourcePaper: promotion.researchAssessment.sourcePaper,
+      confidence: promotion.researchAssessment.confidence,
+      novelty: promotion.researchAssessment.novelty,
+      expectedImpact: promotion.researchAssessment.expectedImpact,
+      suggestedMutationTarget: promotion.researchAssessment.suggestedMutationTarget,
+    } : undefined,
     impactScore: promotion.impactScore,
     summary: promotion.summary,
     evidence: promotion.evidence ? {
@@ -506,8 +666,17 @@ function formatProposalNotification(promotion, trace, route) {
   if (route.senderId && route.channel === 'discord') lines.push(`<@${route.senderId}>`);
   lines.push(`Revenants proposal queued: \`${promotion.id}\``);
   lines.push(`Intent: ${promotion.intent}`);
+  if (promotion.proposalType) lines.push(`Type: ${promotion.proposalType} -> ${promotion.mutationTarget || 'unrouted'}`);
   lines.push(`Risk: ${impactToRiskLabel(promotion.impactScore)} (${Number(promotion.impactScore || 0).toFixed(2)})`);
   lines.push(`Why: ${promotion.summary}`);
+  if (promotion.mutationPlan?.summary) lines.push(`Apply path: ${promotion.mutationPlan.summary}`);
+  if (promotion.researchAssessment?.sourcePaper?.title) lines.push(`Source paper: ${promotion.researchAssessment.sourcePaper.title}`);
+  if (promotion.researchAssessment) {
+    lines.push(`Research confidence: ${Number(promotion.researchAssessment.confidence || 0).toFixed(2)}`);
+    lines.push(`Research novelty: ${Number(promotion.researchAssessment.novelty || 0).toFixed(2)}`);
+    lines.push(`Expected impact: ${promotion.researchAssessment.expectedImpact}`);
+    lines.push(`Suggested target: ${promotion.researchAssessment.suggestedMutationTarget}`);
+  }
   if (trace?.metadata?.toolName) lines.push(`Tool: ${trace.metadata.toolName}`);
   lines.push('Review in chat with:');
   lines.push(`- \`revenants approve ${promotion.id}\``);
@@ -521,6 +690,162 @@ function impactToRiskLabel(score) {
   if (value >= 0.8) return 'high';
   if (value >= 0.5) return 'medium';
   return 'low';
+}
+
+function resolveMutationRoot(rootDir, pluginConfig) {
+  const configured = pluginConfig?.mutationRoot || pluginConfig?.workspaceRoot;
+  if (typeof configured === 'string' && configured.trim()) return configured;
+  return path.resolve(__dirname, '..', '..');
+}
+
+function resolveMutationTargetPath(rootDir, mutationTarget) {
+  return path.join(rootDir, mutationTarget);
+}
+
+function ensureParentDir(filePath) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+}
+
+function defaultDocumentBody(mutationTarget) {
+  if (mutationTarget === 'MEMORY.md') return '# Memory\n';
+  if (mutationTarget === 'TOOLS.md') return '# Tools\n';
+  if (mutationTarget === 'SOUL.md') return '# Soul\n';
+  return '# Agent Notes\n';
+}
+
+function renderMutationEntry(promotion, appliedAt) {
+  const lines = [
+    '',
+    `## Mutation ${promotion.id}`,
+    '',
+    `- Applied: ${appliedAt}`,
+    `- Intent: ${promotion.intent}`,
+    `- Type: ${promotion.proposalType}`,
+    `- Reason: ${promotion.summary}`,
+  ];
+  if (promotion.mutationPlan?.summary) lines.push(`- Apply path: ${promotion.mutationPlan.summary}`);
+  return `${lines.join('\n')}\n`;
+}
+
+function classifyRuntimeHandling(errorText) {
+  const text = String(errorText || '').toLowerCase();
+  if (/timeout/.test(text)) return 'increase-timeout-and-retry-carefully';
+  if (/blocked|denied|forbidden|unauthor|private/.test(text)) return 'avoid-repeat-and-escalate';
+  return 'monitor-and-tune';
+}
+
+function promotionSignature(entry) {
+  const toolName = entry?.evidence?.metadata?.toolName || entry?.toolName || '';
+  const errorText = String(
+    entry?.evidence?.metadata?.error
+      || entry?.evidence?.metadata?.status
+      || entry?.details
+      || '',
+  ).toLowerCase();
+  const normalizedError = classifyRuntimeHandling(errorText);
+  const sourcePaper = entry?.researchAssessment?.sourcePaper?.title
+    || entry?.evidence?.metadata?.sourcePaperTitle
+    || '';
+  return [
+    entry?.proposalType || '',
+    entry?.mutationTarget || '',
+    entry?.intent || '',
+    entry?.applyMode || '',
+    entry?.evidence?.action || '',
+    toolName,
+    normalizedError,
+    sourcePaper,
+  ].join('::');
+}
+
+function createTranslatedResearchPromotion(promotion, appliedAt) {
+  const mutationTarget = promotion?.researchAssessment?.suggestedMutationTarget || 'implementation-task';
+  const route = routeForMutationTarget(mutationTarget);
+  const paperTitle = promotion?.researchAssessment?.sourcePaper?.title || 'research insight';
+  return {
+    id: `${promotion.id}-followup`,
+    timestamp: appliedAt,
+    traceId: promotion.traceId,
+    signalType: 'research',
+    source: 'revenants',
+    target: 'libravdb-review-queue',
+    intent: 'translate-research-insight',
+    impactScore: promotion.impactScore,
+    summary: `Translated research insight from ${paperTitle} into a concrete ${route.type} proposal`,
+    proposalType: route.type,
+    mutationTarget: route.target,
+    applyMode: route.applyMode,
+    validationRequired: route.validationRequired,
+    autoApplyEligible: false,
+    mutationPlan: {
+      rationale: `Research insight approved first; this follow-up isolates the concrete local mutation for separate review.`,
+      summary: route.summary,
+    },
+    evidence: {
+      action: 'research_translation',
+      result: 'success',
+      metadata: {
+        sourceProposalId: promotion.id,
+        sourcePaperTitle: paperTitle,
+      },
+    },
+    parentProposalId: promotion.id,
+  };
+}
+
+function routeForMutationTarget(target) {
+  if (target === 'AGENTS.md') {
+    return {
+      type: 'policy',
+      target,
+      applyMode: 'doc-patch',
+      validationRequired: ['human-review'],
+      summary: 'Patch AGENTS.md with the approved research-derived policy or reasoning guidance.',
+    };
+  }
+  if (target === 'TOOLS.md') {
+    return {
+      type: 'tooling',
+      target,
+      applyMode: 'doc-patch',
+      validationRequired: ['human-review'],
+      summary: 'Patch TOOLS.md with the approved research-derived tool workflow guidance.',
+    };
+  }
+  if (target === 'SOUL.md') {
+    return {
+      type: 'personality',
+      target,
+      applyMode: 'doc-patch',
+      validationRequired: ['human-review'],
+      summary: 'Patch SOUL.md with the approved research-derived persona adjustment.',
+    };
+  }
+  if (target === 'MEMORY.md') {
+    return {
+      type: 'memory',
+      target,
+      applyMode: 'memory-update',
+      validationRequired: ['human-review'],
+      summary: 'Update MEMORY.md with the approved research-derived durable context.',
+    };
+  }
+  if (target === 'runtime-config') {
+    return {
+      type: 'runtime',
+      target,
+      applyMode: 'config-patch',
+      validationRequired: ['schema', 'rollback', 'human-review'],
+      summary: 'Prepare a validated runtime/config patch derived from the approved research insight.',
+    };
+  }
+  return {
+    type: 'implementation',
+    target: 'implementation-task',
+    applyMode: 'task',
+    validationRequired: ['human-review'],
+    summary: 'Convert the approved research insight into an implementation task for separate execution.',
+  };
 }
 
 function ensureSessionRoutes(state) {

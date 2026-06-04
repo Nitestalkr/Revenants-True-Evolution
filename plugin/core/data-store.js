@@ -10,6 +10,8 @@ class DataStore {
     this.tracesFile = path.join(this.dataDir, 'traces.jsonl');
     this.promotionsFile = path.join(this.dataDir, 'promotions.jsonl');
     this.reviewedPromotionsFile = path.join(this.dataDir, 'reviewed-promotions.jsonl');
+    this.appliedMutationsFile = path.join(this.dataDir, 'applied-mutations.jsonl');
+    this.runtimeConfigFile = path.join(this.dataDir, 'runtime-config-overrides.json');
     this.stateFile = path.join(this.dataDir, 'context-state.json');
   }
 
@@ -67,6 +69,39 @@ class DataStore {
 
   readReviewedPromotions(limit = 20) {
     return this.tailJsonl(this.reviewedPromotionsFile, limit);
+  }
+
+  appendAppliedMutation(entry) {
+    this.ensure();
+    fs.appendFileSync(this.appliedMutationsFile, `${JSON.stringify(entry)}\n`);
+  }
+
+  readAppliedMutations(limit = 20) {
+    return this.tailJsonl(this.appliedMutationsFile, limit);
+  }
+
+  readRuntimeConfig() {
+    this.ensure();
+    if (!fs.existsSync(this.runtimeConfigFile)) return this.defaultRuntimeConfig();
+    try {
+      return {
+        ...this.defaultRuntimeConfig(),
+        ...JSON.parse(fs.readFileSync(this.runtimeConfigFile, 'utf8')),
+      };
+    } catch (_) {
+      return this.defaultRuntimeConfig();
+    }
+  }
+
+  writeRuntimeConfig(nextConfig) {
+    this.ensure();
+    const config = {
+      ...this.defaultRuntimeConfig(),
+      ...nextConfig,
+      updatedAt: new Date().toISOString(),
+    };
+    fs.writeFileSync(this.runtimeConfigFile, JSON.stringify(config, null, 2));
+    return config;
   }
 
   acknowledgePromotions(ids = [], meta = {}) {
@@ -171,6 +206,17 @@ class DataStore {
       notifications: {
         sentPromotions: {},
       },
+    };
+  }
+
+  defaultRuntimeConfig() {
+    return {
+      schemaVersion: '0.1.0',
+      updatedAt: new Date().toISOString(),
+      proposalThresholds: {},
+      toolPolicies: {},
+      monitorPolicies: {},
+      appliedProposals: {},
     };
   }
 }

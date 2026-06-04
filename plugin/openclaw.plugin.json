@@ -25,6 +25,10 @@
       "dataDir": {
         "type": "string"
       },
+      "mutationRoot": {
+        "type": "string",
+        "description": "Workspace/document root where approved doc and memory mutations should be written."
+      },
       "injectContext": {
         "type": "boolean",
         "description": "Experimental opt-in. Leave false unless Revenants is explicitly allowed to inject context alongside LibraVDB."
@@ -60,6 +64,11 @@
         "type": "number",
         "minimum": 0,
         "maximum": 1
+      },
+      "proposalCooldownMs": {
+        "type": "integer",
+        "minimum": 0,
+        "description": "Cooldown window for suppressing duplicate proposal signatures after they are queued, reviewed, or applied."
       },
       "promoteToMemory": {
         "type": "boolean",
