@@ -46,6 +46,67 @@ async function main() {
     'failure-cluster auto-work proposal should be suppressed when runtime proposal already exists',
   );
 
+  const staleRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'revenants-auto-work-stale-failure-window-'));
+  const staleObserver = createRevenantsObserver({
+    rootDir: path.join(staleRoot, 'state'),
+    pluginConfig: {
+      dataDir: path.join(staleRoot, 'state'),
+      queueMemoryProposals: true,
+      autoWorkEnabled: true,
+      autoWorkMinIdleMs: 0,
+      autoWorkCooldownMs: 60 * 60 * 1000,
+      failureClusterWindowMs: 60 * 60 * 1000,
+      failureClusterThresholds: {
+        default: 3,
+      },
+    },
+  });
+
+  await staleObserver.start({});
+
+  const oldTimestamp = new Date(Date.now() - (3 * 60 * 60 * 1000)).toISOString();
+  for (let index = 0; index < 3; index += 1) {
+    staleObserver.store.appendTrace({
+      id: `stale-${index}`,
+      timestamp: oldTimestamp,
+      sessionId: `stale-${index}`,
+      sessionKey: 'agent:default:discord:channel:1234567890',
+      signalType: 'tooling',
+      source: 'openclaw',
+      target: 'exec',
+      action: 'after_tool_call',
+      result: 'failure',
+      impactScore: 0.8,
+      metadata: {
+        toolName: 'exec',
+        status: 'failed',
+        error: 'temporary runtime fault',
+        durationMs: 1200,
+      },
+    });
+  }
+
+  staleObserver.store.updateState((state) => {
+    state.counters.toolFailuresObserved = 3;
+    return state;
+  });
+
+  staleObserver.recordHook('after_tool_call', {
+    sessionKey: 'agent:default:discord:channel:1234567890',
+    sessionId: 'fresh-1',
+    toolName: 'exec',
+    status: 'failed',
+    error: 'temporary runtime fault',
+    durationMs: 1200,
+  }, {});
+
+  const staleQueue = staleObserver.reviewQueue('peek', { limit: 10 });
+  assert.strictEqual(
+    staleQueue.queuedCount,
+    0,
+    'old failures outside the cluster window plus one fresh failure should not queue auto-work',
+  );
+
   console.log('auto-work failure-cluster dedupe validation passed');
 }
 

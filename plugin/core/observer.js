@@ -756,8 +756,6 @@ function passesAutoWorkQuiescenceGate(state, pluginConfig) {
 function selectAutoWorkCandidate({ store, state, trace, pluginConfig, queuedPromotion }) {
   const queuedPromotions = store.readPromotions();
   const implementationTasks = store.readImplementationTasks(20);
-  const recentFailures = Number(state?.counters?.toolFailuresObserved || 0);
-  const failureThreshold = Number(state?.runtime?.serviceStartCount ? 3 : 3);
   const failureCluster = describeFailureCluster(trace, store, pluginConfig);
   const linkedRuntimePromotion = failureCluster
     ? findRelatedRuntimePromotion(queuedPromotions, failureCluster)
@@ -799,7 +797,7 @@ function selectAutoWorkCandidate({ store, state, trace, pluginConfig, queuedProm
 
   if (
     failureCluster
-    && recentFailures >= failureThreshold
+    && failureCluster.clusterCount >= failureCluster.threshold
     && !(queuedPromotion && queuedPromotion.proposalType === 'runtime')
     && !linkedRuntimePromotion
   ) {
@@ -816,6 +814,7 @@ function selectAutoWorkCandidate({ store, state, trace, pluginConfig, queuedProm
       normalizedFailureClass: failureCluster.normalizedFailureClass,
       clusterCount: failureCluster.clusterCount,
       clusterWindowMs: failureCluster.clusterWindowMs,
+      clusterThreshold: failureCluster.threshold,
       linkedRuntimeProposalId: queuedPromotion?.id || linkedRuntimePromotion?.id || null,
     });
   }
@@ -899,6 +898,7 @@ function describeFailureCluster(trace, store, pluginConfig) {
     normalizedFailureClass,
     clusterCount: countRecentFailureCluster(store, trace, pluginConfig),
     clusterWindowMs: resolveFailureClusterWindowMs(pluginConfig),
+    threshold: thresholdForFailureHandling(normalizedFailureClass, pluginConfig),
   };
 }
 
