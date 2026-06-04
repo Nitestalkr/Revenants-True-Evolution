@@ -52,6 +52,14 @@ async function main() {
     error: 'timeout contacting upstream',
   }, {});
 
+  observer.recordHook('after_tool_call', {
+    sessionId: 's-2b',
+    sessionKey: 'agent:main:discord:channel:1473342935373447372',
+    toolName: 'exec',
+    status: 'failed',
+    error: 'timeout contacting upstream',
+  }, {});
+
   queue = observer.reviewQueue('peek', { limit: 5 });
   const runtimeProposal = queue.recent.at(-1);
   assert.ok(runtimeProposal, 'runtime proposal should exist');

@@ -11,6 +11,7 @@ class DataStore {
     this.promotionsFile = path.join(this.dataDir, 'promotions.jsonl');
     this.reviewedPromotionsFile = path.join(this.dataDir, 'reviewed-promotions.jsonl');
     this.appliedMutationsFile = path.join(this.dataDir, 'applied-mutations.jsonl');
+    this.implementationTasksFile = path.join(this.dataDir, 'implementation-tasks.jsonl');
     this.runtimeConfigFile = path.join(this.dataDir, 'runtime-config-overrides.json');
     this.stateFile = path.join(this.dataDir, 'context-state.json');
   }
@@ -78,6 +79,15 @@ class DataStore {
 
   readAppliedMutations(limit = 20) {
     return this.tailJsonl(this.appliedMutationsFile, limit);
+  }
+
+  appendImplementationTask(entry) {
+    this.ensure();
+    fs.appendFileSync(this.implementationTasksFile, `${JSON.stringify(entry)}\n`);
+  }
+
+  readImplementationTasks(limit = 20) {
+    return this.tailJsonl(this.implementationTasksFile, limit);
   }
 
   readRuntimeConfig() {
@@ -205,6 +215,13 @@ class DataStore {
       sessionRoutes: {},
       notifications: {
         sentPromotions: {},
+      },
+      autoWork: {
+        lastUserActivityAt: null,
+        lastAgentActivityAt: null,
+        lastEvaluationAt: null,
+        lastProposalAt: null,
+        lastCandidateKey: null,
       },
     };
   }

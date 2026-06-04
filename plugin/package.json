@@ -11,7 +11,7 @@
     ]
   },
   "scripts": {
-    "test": "node ../tests/js/validate-monitor-suite.js && node ../tests/js/validate-context-engine.js && node ../tests/js/validate-companion-mode.js && node ../tests/js/validate-plugin-boundaries.js && node ../tests/js/validate-proposal-routing.js && node ../tests/js/validate-research-proposals.js && node ../tests/js/validate-proposal-application.js && node ../tests/js/validate-proposal-deduping.js && node ../tests/js/validate-research-translation.js && node ../tests/js/validate-proposal-notifications.js && node ../tests/js/validate-chat-review-bridge.js",
+    "test": "node ../tests/js/validate-monitor-suite.js && node ../tests/js/validate-context-engine.js && node ../tests/js/validate-companion-mode.js && node ../tests/js/validate-plugin-boundaries.js && node ../tests/js/validate-proposal-routing.js && node ../tests/js/validate-research-proposals.js && node ../tests/js/validate-proposal-application.js && node ../tests/js/validate-proposal-deduping.js && node ../tests/js/validate-failure-pressure.js && node ../tests/js/validate-research-translation.js && node ../tests/js/validate-auto-work-proposals.js && node ../tests/js/validate-proposal-notifications.js && node ../tests/js/validate-chat-review-bridge.js",
     "test:plugin-native": "node ../tests/js/validate-plugin-native-runtime.js && node ../tests/js/validate-observer-status-reconciliation.js && node ../tests/js/validate-shared-observer-runtime.js",
     "test:cron-guard": "node ../tests/js/validate-cron-historical-only.js",
     "ci": "npm test && npm run test:plugin-native && npm run test:cron-guard"

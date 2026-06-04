@@ -70,6 +70,60 @@
         "minimum": 0,
         "description": "Cooldown window for suppressing duplicate proposal signatures after they are queued, reviewed, or applied."
       },
+      "failureClusterWindowMs": {
+        "type": "integer",
+        "minimum": 0,
+        "description": "Time window for clustering repeated tooling failures before ordinary runtime failures promote into proposals."
+      },
+      "failureClusterThresholds": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "policy": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "timeout": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "default": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "autoWorkEnabled": {
+        "type": "boolean",
+        "description": "Enable observer-driven auto-work candidate proposals when quiescent pressure is detected."
+      },
+      "autoWorkMinIdleMs": {
+        "type": "integer",
+        "minimum": 0,
+        "description": "Minimum time since the last user interaction before auto-work evaluation may queue a proposal."
+      },
+      "autoWorkCooldownMs": {
+        "type": "integer",
+        "minimum": 0,
+        "description": "Cooldown window for suppressing repeated auto-work proposals for the same candidate."
+      },
+      "autoWork": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "minIdleMs": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "cooldownMs": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
       "promoteToMemory": {
         "type": "boolean",
         "description": "Deprecated compatibility flag; use queueMemoryProposals."

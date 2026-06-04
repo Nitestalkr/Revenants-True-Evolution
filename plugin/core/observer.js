@@ -28,6 +28,13 @@ const DEFAULT_HOOKS = [
   'agent_end',
 ];
 
+const AUTO_WORK_TRIGGER_ACTIONS = new Set([
+  'session_end',
+  'agent_end',
+  'after_tool_call',
+  'monitor_alert',
+]);
+
 function createRevenantsObserver(ctx = {}) {
   return new RevenantsObserver(ctx);
 }
@@ -165,6 +172,7 @@ class RevenantsObserver {
         started: this.started,
         monitorsRunning: Boolean(this.suite),
       });
+      updateAutoWorkEvaluationMarker(state, trace);
       updateCounters(state, trace, Boolean(promotion));
       updateDriveScores(state, trace);
       updateGraoSignals(state, trace, promotion);
@@ -174,13 +182,30 @@ class RevenantsObserver {
     if (promotion) {
       void this.notifyQueuedPromotion(promotion, trace);
     }
+
+    const autoWorkPromotion = this.maybeQueueAutoWork(trace);
+    if (autoWorkPromotion) {
+      void this.notifyQueuedPromotion(autoWorkPromotion, trace);
+    }
   }
 
   shouldPromote(trace) {
     if (this.pluginConfig.queueMemoryProposals === false) return false;
     if (this.pluginConfig.promoteToMemory === false) return false;
+    if (trace.signalType === 'tooling' && trace.result === 'failure') {
+      return this.shouldPromoteToolFailure(trace);
+    }
     if (trace.result === 'failure' || trace.result === 'partial') return true;
     return Number(trace.impactScore || 0) >= Number(this.pluginConfig.proposalMinImpact ?? this.pluginConfig.promotionMinImpact ?? 0.7);
+  }
+
+  shouldPromoteToolFailure(trace) {
+    const handling = classifyRuntimeHandling(
+      trace?.metadata?.error || trace?.metadata?.status || '',
+    );
+    const clusterCount = countRecentFailureCluster(this.store, trace, this.pluginConfig);
+    const threshold = thresholdForFailureHandling(handling, this.pluginConfig);
+    return clusterCount >= threshold;
   }
 
   shouldQueuePromotion(promotion) {
@@ -398,14 +423,13 @@ class RevenantsObserver {
       return record;
     }
 
-    const taskPath = path.join(this.rootDir, 'data', 'implementation-tasks.jsonl');
-    fs.appendFileSync(taskPath, `${JSON.stringify({
+    this.store.appendImplementationTask({
       proposalId: promotion.id,
       createdAt: appliedAt,
       summary: promotion.summary,
       mutationTarget: promotion.mutationTarget,
       evidence: promotion.evidence,
-    })}\n`);
+    });
     const record = {
       ...baseRecord,
       status: 'applied',
@@ -413,6 +437,67 @@ class RevenantsObserver {
     };
     this.store.appendAppliedMutation(record);
     return record;
+  }
+
+  maybeQueueAutoWork(trace) {
+    if (!isAutoWorkEnabled(this.pluginConfig)) return null;
+    if (!shouldEvaluateAutoWorkTrigger(trace)) return null;
+
+    const state = this.store.readState();
+    ensureAutoWorkState(state).lastEvaluationAt = trace.timestamp || new Date().toISOString();
+    this.store.writeState(state);
+
+    if (!passesAutoWorkQuiescenceGate(state, this.pluginConfig)) return null;
+
+    const queuedPromotions = this.store.readPromotions();
+    if (queuedPromotions.some((entry) => entry?.intent?.startsWith?.('auto-work:'))) return null;
+
+    const recentEntries = [
+      ...this.store.readReviewedPromotions(50),
+      ...this.store.readAppliedMutations(50),
+    ];
+    const candidate = selectAutoWorkCandidate({
+      store: this.store,
+      state,
+      trace,
+      recentEntries,
+    });
+
+    if (!candidate) return null;
+    if (isAutoWorkCandidateCoolingDown(candidate, recentEntries, this.pluginConfig)) return null;
+
+    const promotion = buildAutoWorkPromotion(candidate, trace);
+    if (!this.shouldQueuePromotion(promotion)) return null;
+
+    this.store.appendPromotion(promotion);
+    this.store.appendTrace({
+      id: `${promotion.id}-trace`,
+      timestamp: promotion.timestamp,
+      sessionId: trace.sessionId || null,
+      sessionKey: trace.sessionKey || null,
+      signalType: 'runtime',
+      source: 'revenants',
+      target: trace.sessionKey || trace.sessionId || 'openclaw-runtime',
+      action: 'auto_work_candidate',
+      result: 'success',
+      impactScore: promotion.impactScore,
+      metadata: {
+        trigger: trace.action,
+        status: candidate.kind,
+      },
+    });
+    this.store.updateState((nextState) => {
+      ensureAutoWorkState(nextState).lastProposalAt = promotion.timestamp;
+      ensureAutoWorkState(nextState).lastCandidateKey = candidate.key;
+      updateCounters(nextState, { action: 'auto_work_candidate' }, true);
+      updateGraoSignals(nextState, {
+        signalType: 'runtime',
+        result: 'success',
+        action: 'auto_work_candidate',
+      }, promotion);
+      return nextState;
+    });
+    return promotion;
   }
 }
 
@@ -598,6 +683,204 @@ function updateGraoSignals(state, trace, promotion) {
     ]);
     state.grao.lastProposalAt = promotion.timestamp;
   }
+}
+
+function ensureAutoWorkState(state) {
+  if (!state.autoWork || typeof state.autoWork !== 'object') {
+    state.autoWork = {
+      lastUserActivityAt: null,
+      lastAgentActivityAt: null,
+      lastEvaluationAt: null,
+      lastProposalAt: null,
+      lastCandidateKey: null,
+    };
+  }
+  state.autoWork.lastUserActivityAt = state.autoWork.lastUserActivityAt || null;
+  state.autoWork.lastAgentActivityAt = state.autoWork.lastAgentActivityAt || null;
+  state.autoWork.lastEvaluationAt = state.autoWork.lastEvaluationAt || null;
+  state.autoWork.lastProposalAt = state.autoWork.lastProposalAt || null;
+  state.autoWork.lastCandidateKey = state.autoWork.lastCandidateKey || null;
+  return state.autoWork;
+}
+
+function updateAutoWorkEvaluationMarker(state, trace) {
+  const autoWork = ensureAutoWorkState(state);
+  const timestamp = trace.timestamp || new Date().toISOString();
+  if (trace.signalType === 'user_interaction') autoWork.lastUserActivityAt = timestamp;
+  if (trace.signalType === 'agent' || trace.signalType === 'tooling' || trace.signalType === 'runtime') {
+    autoWork.lastAgentActivityAt = timestamp;
+  }
+  autoWork.lastEvaluationAt = timestamp;
+}
+
+function isAutoWorkEnabled(pluginConfig) {
+  return pluginConfig?.autoWorkEnabled === true || pluginConfig?.autoWork?.enabled === true;
+}
+
+function shouldEvaluateAutoWorkTrigger(trace) {
+  if (!trace || trace.signalType === 'user_interaction') return false;
+  return AUTO_WORK_TRIGGER_ACTIONS.has(String(trace.action || ''));
+}
+
+function passesAutoWorkQuiescenceGate(state, pluginConfig) {
+  const autoWork = ensureAutoWorkState(state);
+  const minIdleMs = Number(
+    pluginConfig?.autoWork?.minIdleMs
+      ?? pluginConfig?.autoWorkMinIdleMs
+      ?? 20 * 60 * 1000,
+  );
+  const lastUserAt = autoWork.lastUserActivityAt ? new Date(autoWork.lastUserActivityAt).getTime() : 0;
+  if (!lastUserAt) return true;
+  return (Date.now() - lastUserAt) >= minIdleMs;
+}
+
+function selectAutoWorkCandidate({ store, state, trace }) {
+  const queuedPromotions = store.readPromotions();
+  const implementationTasks = store.readImplementationTasks(20);
+  const recentFailures = Number(state?.counters?.toolFailuresObserved || 0);
+  const failureThreshold = Number(state?.runtime?.serviceStartCount ? 3 : 3);
+
+  const candidates = [];
+  const translatedFollowUp = [...queuedPromotions].reverse().find((entry) => (
+    entry?.parentProposalId
+      && entry?.proposalType === 'implementation'
+      && entry?.mutationTarget === 'implementation-task'
+  ));
+
+  if (translatedFollowUp) {
+    candidates.push({
+      key: `translated-followup:${translatedFollowUp.id}`,
+      kind: 'translated_followup',
+      rank: 0.92,
+      impactScore: Math.max(0.82, Number(translatedFollowUp.impactScore || 0.82)),
+      summary: `Resume the translated follow-up from approved research proposal ${translatedFollowUp.parentProposalId}.`,
+      details: translatedFollowUp.summary,
+      sourceProposalId: translatedFollowUp.id,
+      trigger: trace.action,
+    });
+  }
+
+  const latestTask = implementationTasks.at(-1);
+  if (latestTask) {
+    candidates.push({
+      key: `implementation-task:${latestTask.proposalId || latestTask.createdAt}`,
+      kind: 'implementation_backlog',
+      rank: 0.86,
+      impactScore: 0.78,
+      summary: `Resume previous implementation work from ${latestTask.proposalId || 'the latest approved task backlog'}.`,
+      details: latestTask.summary,
+      sourceProposalId: latestTask.proposalId || null,
+      trigger: trace.action,
+    });
+  }
+
+  if (recentFailures >= failureThreshold) {
+    candidates.push({
+      key: `failure-cluster:${recentFailures}`,
+      kind: 'failure_cluster',
+      rank: 0.74,
+      impactScore: 0.76,
+      summary: `Investigate repeated runtime/tool failure pressure (${recentFailures} observed failures) before it compounds further.`,
+      details: 'Repeated failures remain a pressure source in the observer state and should be turned into a bounded follow-up task.',
+      sourceProposalId: null,
+      trigger: trace.action,
+    });
+  }
+
+  return candidates.sort((a, b) => b.rank - a.rank || b.impactScore - a.impactScore)[0] || null;
+}
+
+function isAutoWorkCandidateCoolingDown(candidate, recentEntries, pluginConfig) {
+  const cooldownMs = Number(
+    pluginConfig?.autoWork?.cooldownMs
+      ?? pluginConfig?.autoWorkCooldownMs
+      ?? 60 * 60 * 1000,
+  );
+  for (const entry of recentEntries || []) {
+    if (!entry?.intent || !String(entry.intent).startsWith('auto-work:')) continue;
+    if (String(entry.intent) !== `auto-work:${candidate.key}`) continue;
+    const timestamp = entry.reviewedAt || entry.appliedAt || entry.timestamp;
+    if (!timestamp) continue;
+    const ageMs = Date.now() - new Date(timestamp).getTime();
+    if (Number.isFinite(ageMs) && ageMs >= 0 && ageMs < cooldownMs) return true;
+  }
+  return false;
+}
+
+function buildAutoWorkPromotion(candidate, trace) {
+  return {
+    id: `autowork-${Date.now().toString(36)}`,
+    timestamp: new Date().toISOString(),
+    traceId: trace.id,
+    signalType: 'runtime',
+    source: 'revenants',
+    target: 'libravdb-review-queue',
+    intent: `auto-work:${candidate.key}`,
+    impactScore: candidate.impactScore,
+    summary: candidate.summary,
+    proposalType: 'implementation',
+    mutationTarget: 'implementation-task',
+    applyMode: 'task',
+    validationRequired: ['human-review', 'bounded-scope'],
+    autoApplyEligible: false,
+    mutationPlan: {
+      rationale: 'Observer-detected pressure should become a bounded follow-up task proposal before any self-initiated execution is allowed.',
+      summary: 'Queue a bounded implementation follow-up task for separate execution review.',
+    },
+    evidence: {
+      action: 'auto_work_evaluation',
+      result: 'success',
+      metadata: {
+        status: candidate.kind,
+        trigger: candidate.trigger,
+        sourceProposalId: candidate.sourceProposalId,
+      },
+    },
+    autoWorkCandidate: {
+      kind: candidate.kind,
+      key: candidate.key,
+      details: candidate.details,
+    },
+  };
+}
+
+function countRecentFailureCluster(store, trace, pluginConfig) {
+  const traces = store.tailTraces(200);
+  const windowMs = Number(
+    pluginConfig?.failureClusterWindowMs
+      ?? pluginConfig?.autoWork?.failureClusterWindowMs
+      ?? 30 * 60 * 1000,
+  );
+  const handling = classifyRuntimeHandling(
+    trace?.metadata?.error || trace?.metadata?.status || '',
+  );
+  const toolName = String(trace?.metadata?.toolName || '');
+  const currentTime = new Date(trace?.timestamp || Date.now()).getTime();
+
+  let count = 0;
+  for (const entry of traces) {
+    if (entry?.signalType !== 'tooling' || entry?.result !== 'failure') continue;
+    if (String(entry?.metadata?.toolName || '') !== toolName) continue;
+    const entryHandling = classifyRuntimeHandling(
+      entry?.metadata?.error || entry?.metadata?.status || '',
+    );
+    if (entryHandling !== handling) continue;
+    const timestamp = new Date(entry?.timestamp || 0).getTime();
+    if (!Number.isFinite(timestamp) || timestamp <= 0) continue;
+    if ((currentTime - timestamp) <= windowMs) count += 1;
+  }
+  return count;
+}
+
+function thresholdForFailureHandling(handling, pluginConfig) {
+  const configured = pluginConfig?.failureClusterThresholds || {};
+  if (handling === 'avoid-repeat-and-escalate') {
+    return Number(configured.policy ?? 1);
+  }
+  if (handling === 'increase-timeout-and-retry-carefully') {
+    return Number(configured.timeout ?? 2);
+  }
+  return Number(configured.default ?? 3);
 }
 
 function refreshActiveProposals(promotions) {
