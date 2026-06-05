@@ -13,7 +13,7 @@ function main() {
     result: 'failure',
     impactScore: 0.8,
     metadata: {
-      toolName: 'web_fetch',
+      toolName: 'exec',
       error: 'blocked private address',
     },
   });
@@ -22,6 +22,25 @@ function main() {
   assert.strictEqual(policyPromotion.mutationTarget, 'AGENTS.md');
   assert.strictEqual(policyPromotion.applyMode, 'doc-patch');
   assert.deepStrictEqual(policyPromotion.validationRequired, ['human-review']);
+
+  const toolingPromotion = buildPromotion({
+    id: 'trace-tooling-guidance',
+    timestamp: new Date().toISOString(),
+    signalType: 'tooling',
+    source: 'openclaw-hook',
+    action: 'after_tool_call',
+    result: 'failure',
+    impactScore: 0.8,
+    metadata: {
+      toolName: 'web_fetch',
+      error: 'blocked private address',
+    },
+  });
+
+  assert.strictEqual(toolingPromotion.proposalType, 'tooling');
+  assert.strictEqual(toolingPromotion.mutationTarget, 'TOOLS.md');
+  assert.strictEqual(toolingPromotion.applyMode, 'doc-patch');
+  assert.deepStrictEqual(toolingPromotion.validationRequired, ['human-review']);
 
   const runtimePromotion = buildPromotion({
     id: 'trace-runtime',

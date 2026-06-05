@@ -116,18 +116,17 @@ class MonitorSuite extends EventEmitter {
           mode: 'research-evolution-source',
           reason: 'optional research-evolution lane; disabled unless explicitly enabled',
         };
+    const historicalSchedulerSignals = this.historicalSchedulerSignals
+      ? this.historicalSchedulerSignals.getState()
+      : { enabled: false, reason: 'plugin-native runtime; scheduler migration signals are historical reference only' };
     return {
       ts: new Date().toISOString(),
       boredom: this.boredom.getState(),
       stability: this.stability.getState(),
       researchEvolution,
       arxiv: researchEvolution,
-      historicalSchedulerSignals: this.historicalSchedulerSignals
-        ? this.historicalSchedulerSignals.getState()
-        : { enabled: false, reason: 'plugin-native runtime; scheduler migration signals are historical reference only' },
-      legacyCronSignals: this.historicalSchedulerSignals
-        ? this.historicalSchedulerSignals.getState()
-        : { enabled: false, reason: 'plugin-native runtime; scheduler migration signals are historical reference only' },
+      historicalSchedulerSignals,
+      legacyCronSignals: historicalSchedulerSignals,
       systemHealth: this.systemHealth.getState(),
       alerts: this.alerts.getAlerts(10),
     };

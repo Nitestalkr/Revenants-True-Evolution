@@ -178,6 +178,7 @@ function routePromotion(trace) {
   const result = String(trace?.result || '');
   const metadata = trace?.metadata || {};
   const errorText = String(metadata.error || metadata.status || '').toLowerCase();
+  const toolName = String(metadata.toolName || '').toLowerCase();
 
   if (signalType === 'memory') {
     return {
@@ -217,6 +218,18 @@ function routePromotion(trace) {
   }
 
   if (signalType === 'tooling') {
+    if (/^(web_fetch|web_search)$/.test(toolName) && /blocked|denied|forbidden|unauthor|private/.test(errorText)) {
+      return {
+        type: 'tooling',
+        target: 'TOOLS.md',
+        applyMode: 'doc-patch',
+        validationRequired: ['human-review'],
+        autoApplyEligible: false,
+        rationale: 'Web fetch/search access constraints are usually workflow and fallback issues, so they belong in operator tool guidance.',
+        summary: 'Patch TOOLS.md with safer fetch/search fallback guidance for this failure class.',
+      };
+    }
+
     if (/blocked|denied|unauthor|private|forbidden|policy/i.test(errorText)) {
       return {
         type: 'policy',

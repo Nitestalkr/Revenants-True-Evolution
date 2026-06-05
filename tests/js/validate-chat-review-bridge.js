@@ -56,6 +56,14 @@ async function main() {
       error: 'blocked',
       durationMs: 50,
     }, {});
+    await api.hooks.after_tool_call({
+      sessionId: 's-1b',
+      sessionKey: 'agent:main:discord:channel:1473342935373447372',
+      toolName: 'web_fetch',
+      status: 'failed',
+      error: 'blocked',
+      durationMs: 50,
+    }, {});
 
     await delay(100);
 
@@ -84,7 +92,7 @@ async function main() {
     const messageFlagIndex = approvalMessage.indexOf('--message');
     assert.ok(messageFlagIndex >= 0, 'bridge reply should send a chat message');
     assert.ok(approvalMessage[messageFlagIndex + 1].includes('Revenants approved'), 'bridge reply should confirm approval');
-    assert.ok(approvalMessage[messageFlagIndex + 1].includes('Routed as policy -> AGENTS.md via doc-patch.'), 'bridge reply should include mutation routing');
+    assert.ok(approvalMessage[messageFlagIndex + 1].includes('Routed as tooling -> TOOLS.md via doc-patch.'), 'bridge reply should include mutation routing');
 
     console.log('chat review bridge validation passed');
   } finally {

@@ -51,7 +51,31 @@ async function main() {
   }, {});
 
   queue = observer.reviewQueue('peek', { limit: 10 });
-  assert.strictEqual(queue.queuedCount, 2, 'policy failures should still surface immediately');
+  assert.strictEqual(queue.queuedCount, 1, 'single web_fetch access-constraint failure should not queue immediately');
+
+  observer.recordHook('after_tool_call', {
+    sessionId: 'policy-2',
+    sessionKey: 'agent:main:discord:channel:1473342935373447372',
+    toolName: 'web_fetch',
+    status: 'failed',
+    error: 'blocked private address',
+  }, {});
+
+  queue = observer.reviewQueue('peek', { limit: 10 });
+  assert.strictEqual(queue.queuedCount, 2, 'clustered web_fetch access-constraint failures should queue one tooling proposal');
+  assert.strictEqual(queue.recent.at(-1).proposalType, 'tooling');
+  assert.strictEqual(queue.recent.at(-1).mutationTarget, 'TOOLS.md');
+
+  observer.recordHook('after_tool_call', {
+    sessionId: 'policy-3',
+    sessionKey: 'agent:main:discord:channel:1473342935373447372',
+    toolName: 'exec',
+    status: 'failed',
+    error: 'blocked private address',
+  }, {});
+
+  queue = observer.reviewQueue('peek', { limit: 10 });
+  assert.strictEqual(queue.queuedCount, 3, 'true policy-shaped tool failures should still surface immediately');
   assert.strictEqual(queue.recent.at(-1).proposalType, 'policy');
 
   console.log('failure pressure validation passed');

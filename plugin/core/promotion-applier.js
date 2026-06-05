@@ -153,9 +153,13 @@ function renderMutationEntry(promotion, appliedAt) {
   return `${lines.join('\n')}\n`;
 }
 
-function classifyRuntimeHandling(errorText) {
+function classifyRuntimeHandling(errorText, opts = {}) {
   const text = String(errorText || '').toLowerCase();
+  const toolName = String(opts.toolName || '').toLowerCase();
   if (/timeout/.test(text)) return 'increase-timeout-and-retry-carefully';
+  if (/^(web_fetch|web_search)$/.test(toolName) && /blocked|denied|forbidden|unauthor|private/.test(text)) {
+    return 'document-tool-constraint-and-escalate';
+  }
   if (/blocked|denied|forbidden|unauthor|private/.test(text)) return 'avoid-repeat-and-escalate';
   return 'monitor-and-tune';
 }

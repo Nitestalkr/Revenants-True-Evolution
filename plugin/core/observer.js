@@ -208,6 +208,7 @@ class RevenantsObserver {
   shouldPromoteToolFailure(trace) {
     const handling = classifyRuntimeHandling(
       trace?.metadata?.error || trace?.metadata?.status || '',
+      { toolName: trace?.metadata?.toolName || '' },
     );
     const clusterCount = countRecentFailureCluster(this.store, trace, this.pluginConfig);
     const threshold = thresholdForFailureHandling(handling, this.pluginConfig);
@@ -795,6 +796,7 @@ function describeFailureCluster(trace, store, pluginConfig) {
   if (!toolName) return null;
   const normalizedFailureClass = classifyRuntimeHandling(
     trace?.metadata?.error || trace?.metadata?.status || '',
+    { toolName: trace?.metadata?.toolName || '' },
   );
   return {
     toolName,
@@ -812,6 +814,7 @@ function findRelatedRuntimePromotion(promotions, failureCluster) {
     if (toolName !== String(failureCluster?.toolName || '')) continue;
     const normalizedFailureClass = classifyRuntimeHandling(
       entry?.evidence?.metadata?.error || entry?.evidence?.metadata?.status || '',
+      { toolName: entry?.evidence?.metadata?.toolName || '' },
     );
     if (normalizedFailureClass !== failureCluster?.normalizedFailureClass) continue;
     return entry;
@@ -824,6 +827,7 @@ function countRecentFailureCluster(store, trace, pluginConfig) {
   const windowMs = resolveFailureClusterWindowMs(pluginConfig);
   const handling = classifyRuntimeHandling(
     trace?.metadata?.error || trace?.metadata?.status || '',
+    { toolName: trace?.metadata?.toolName || '' },
   );
   const toolName = String(trace?.metadata?.toolName || '');
   const currentTime = new Date(trace?.timestamp || Date.now()).getTime();
@@ -834,6 +838,7 @@ function countRecentFailureCluster(store, trace, pluginConfig) {
     if (String(entry?.metadata?.toolName || '') !== toolName) continue;
     const entryHandling = classifyRuntimeHandling(
       entry?.metadata?.error || entry?.metadata?.status || '',
+      { toolName: entry?.metadata?.toolName || '' },
     );
     if (entryHandling !== handling) continue;
     const timestamp = new Date(entry?.timestamp || 0).getTime();
@@ -855,6 +860,9 @@ function thresholdForFailureHandling(handling, pluginConfig) {
   const configured = pluginConfig?.failureClusterThresholds || {};
   if (handling === 'avoid-repeat-and-escalate') {
     return Number(configured.policy ?? 1);
+  }
+  if (handling === 'document-tool-constraint-and-escalate') {
+    return Number(configured.toolingPolicy ?? 2);
   }
   if (handling === 'increase-timeout-and-retry-carefully') {
     return Number(configured.timeout ?? 2);
@@ -979,7 +987,7 @@ function promotionSignature(entry) {
       || entry?.details
       || '',
   ).toLowerCase();
-  const normalizedError = classifyRuntimeHandling(errorText);
+  const normalizedError = classifyRuntimeHandling(errorText, { toolName });
   const sourcePaper = entry?.researchAssessment?.sourcePaper?.title
     || entry?.evidence?.metadata?.sourcePaperTitle
     || '';
