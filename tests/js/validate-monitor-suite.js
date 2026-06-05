@@ -11,7 +11,7 @@
 
 const MonitorSuite = require('../../plugin/monitors/monitor-suite');
 const BoredomMonitor = require('../../plugin/monitors/boredom-monitor');
-const LegacyCronSignalMonitor = require('../../plugin/monitors/cron-health-monitor');
+const HistoricalSchedulerSignalMonitor = require('../../plugin/monitors/historical-scheduler-signal-monitor');
 const AlertSystem = require('../../plugin/monitors/alert-system');
 const fs = require('fs');
 const os = require('os');
@@ -63,9 +63,9 @@ async function testBoredomMonitor() {
   assert(true, 'stop() does not throw');
 }
 
-async function testLegacyCronSignalMonitor() {
-  console.log('\n[2] LegacyCronSignalMonitor');
-  const m = new LegacyCronSignalMonitor();
+async function testHistoricalSchedulerSignalMonitor() {
+  console.log('\n[2] HistoricalSchedulerSignalMonitor');
+  const m = new HistoricalSchedulerSignalMonitor({ enabled: true });
   let alertFired = false;
   m.on('alert', () => { alertFired = true; });
 
@@ -83,7 +83,7 @@ async function testLegacyCronSignalMonitor() {
   m.reportFailure('test-cron', 'test failure');
   const failedJob = m.getState().jobs.find(j => j.name === 'test-cron');
   assert(failedJob.status === 'failed', 'job status failed after failure');
-  assert(alertFired, 'alert fired on legacy cron failure');
+  assert(alertFired, 'alert fired on historical scheduler failure');
 
   m.stop();
 }
@@ -91,25 +91,25 @@ async function testLegacyCronSignalMonitor() {
 async function testAlertSystem() {
   console.log('\n[3] AlertSystem + wiring');
   const boredom = new BoredomMonitor();
-  const legacyCronSignals = new LegacyCronSignalMonitor();
+  const historicalSchedulerSignals = new HistoricalSchedulerSignalMonitor({ enabled: true });
   const alerts = new AlertSystem();
 
   alerts.attachMonitor('boredom', boredom);
-  alerts.attachMonitor('legacyCronSignals', legacyCronSignals);
+  alerts.attachMonitor('historicalSchedulerSignals', historicalSchedulerSignals);
 
   let receivedAlert = null;
   alerts.subscribe('test-session', msg => { receivedAlert = msg; });
 
   // Trigger a historical cron signal failure alert
-  legacyCronSignals.start();
-  legacyCronSignals.reportFailure('some-cron', 'test reason');
+  historicalSchedulerSignals.start();
+  historicalSchedulerSignals.reportFailure('some-cron', 'test reason');
 
   await delay(100);
 
   assert(receivedAlert !== null, 'subscriber received alert');
   assert(receivedAlert.type === 'monitor_alert', 'alert type is monitor_alert');
-  assert(receivedAlert.alert.type === 'legacy_cron_failure', 'inner alert type is legacy_cron_failure');
-  assert(receivedAlert.alert.severity === 'error', 'legacy cron failure severity is error');
+  assert(receivedAlert.alert.type === 'historical_scheduler_failure', 'inner alert type is historical_scheduler_failure');
+  assert(receivedAlert.alert.severity === 'error', 'historical scheduler failure severity is error');
   assert(receivedAlert.alert.payload.job === 'some-cron', 'alert payload has job name');
 
   const queued = alerts.drainQueue();
@@ -117,7 +117,7 @@ async function testAlertSystem() {
   const afterDrain = alerts.drainQueue();
   assert(afterDrain.length === 0, 'queue empty after second drain');
 
-  legacyCronSignals.stop();
+  historicalSchedulerSignals.stop();
 }
 
 async function testMonitorSuite() {
@@ -147,15 +147,15 @@ async function testMonitorSuite() {
   assert(snapshot.stability != null, 'snapshot has stability');
   assert(snapshot.researchEvolution != null, 'snapshot has researchEvolution');
   assert(snapshot.researchEvolution.enabled === false, 'research evolution lane disabled by default');
-  assert(snapshot.legacyCronSignals != null, 'snapshot has legacyCronSignals');
-  assert(snapshot.legacyCronSignals.enabled === false, 'legacy cron signals disabled by default');
+  assert(snapshot.historicalSchedulerSignals != null, 'snapshot has historicalSchedulerSignals');
+  assert(snapshot.historicalSchedulerSignals.enabled === false, 'historical scheduler signals disabled by default');
 
     const drained = suite.drainAlerts();
-    const legacyCronAlerts = drained.filter((alert) => String(alert?.type || '').startsWith('legacy_cron_'));
-    const legacyCronBroadcasts = observedAlerts.filter((msg) => String(msg?.alert?.type || '').startsWith('legacy_cron_'));
+    const historicalSchedulerAlerts = drained.filter((alert) => String(alert?.type || '').startsWith('historical_scheduler_'));
+    const historicalSchedulerBroadcasts = observedAlerts.filter((msg) => String(msg?.alert?.type || '').startsWith('historical_scheduler_'));
 
-    assert(legacyCronBroadcasts.length === 0, 'default suite does not emit legacy cron alerts');
-    assert(legacyCronAlerts.length === 0, 'drainAlerts has no legacy cron alerts without explicit legacy cron input');
+    assert(historicalSchedulerBroadcasts.length === 0, 'default suite does not emit historical scheduler alerts');
+    assert(historicalSchedulerAlerts.length === 0, 'drainAlerts has no historical scheduler alerts without explicit historical input');
   } finally {
     suite.stop();
     fs.rmSync(dataDir, { recursive: true, force: true });
@@ -173,9 +173,9 @@ async function main() {
   }
 
   try {
-    await testLegacyCronSignalMonitor();
+    await testHistoricalSchedulerSignalMonitor();
   } catch (e) {
-    console.error('LegacyCronSignalMonitor test threw:', e.message);
+    console.error('HistoricalSchedulerSignalMonitor test threw:', e.message);
     failed++;
   }
 

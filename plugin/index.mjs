@@ -301,30 +301,58 @@ function createProposalNotifier(api, pluginConfig) {
 }
 
 function createSessionReplySender(api, pluginConfig, opts = {}) {
+  const nativeSend = detectNativeMessageSender(api);
+
   return async ({ route, message }) => {
     if (!route?.channel || !route?.target || !message) return;
-    const args = [
-      'message',
-      'send',
-      '--channel',
-      route.channel,
-      '--target',
-      route.target,
-      '--message',
+    const payload = {
+      channel: route.channel,
+      target: route.target,
       message,
-    ];
+      accountId: route.accountId ? String(route.accountId) : undefined,
+      threadId: route.threadId !== undefined && route.threadId !== null ? String(route.threadId) : undefined,
+      replyToId: route.replyToId ? String(route.replyToId) : undefined,
+    };
 
-    if (route.accountId) args.push('--account', String(route.accountId));
-    if (route.threadId !== undefined && route.threadId !== null) args.push('--thread-id', String(route.threadId));
-    if (route.replyToId) args.push('--reply-to', String(route.replyToId));
+    if (nativeSend) {
+      await nativeSend(payload);
+    } else {
+      const args = [
+        'message',
+        'send',
+        '--channel',
+        route.channel,
+        '--target',
+        route.target,
+        '--message',
+        message,
+      ];
 
-    await execFileAsync('openclaw', args, {
-      timeout: Number(pluginConfig.proposalNotifyTimeoutMs) || 15000,
-      env: process.env,
-    });
+      if (payload.accountId) args.push('--account', payload.accountId);
+      if (payload.threadId) args.push('--thread-id', payload.threadId);
+      if (payload.replyToId) args.push('--reply-to', payload.replyToId);
+
+      await execFileAsync('openclaw', args, {
+        timeout: Number(pluginConfig.proposalNotifyTimeoutMs) || 15000,
+        env: process.env,
+      });
+    }
 
     if (opts.logPrefix) api.logger?.info?.(`${opts.logPrefix} ${route.channel}:${route.target}.`);
   };
+}
+
+function detectNativeMessageSender(api) {
+  if (typeof api?.sendMessage === 'function') {
+    return (payload) => api.sendMessage(payload);
+  }
+  if (typeof api?.message?.send === 'function') {
+    return (payload) => api.message.send(payload);
+  }
+  if (typeof api?.runtime?.message?.send === 'function') {
+    return (payload) => api.runtime.message.send(payload);
+  }
+  return null;
 }
 
 function parseChatReviewCommand(event = {}, hookContext = {}) {

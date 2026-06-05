@@ -1,7 +1,7 @@
 # Revenants Baseline Audit
 
-This note captures the agreed first-baseline import shape for the
-`Nitestalkr/Revenants-True-Evolution` repository.
+This note captures the agreed first-baseline import shape for the Revenants
+repository.
 
 ## Include
 
@@ -55,13 +55,13 @@ This note captures the agreed first-baseline import shape for the
 - JavaScript/OpenClaw source lives under `plugin/`.
 - Python prototype source lives under `revenant/`.
 - Fedora pytest remains under `revenant/tests/` for the first baseline.
-- Fixtures only live under `tests/fixtures/` if Josh explicitly approves them.
+- Fixtures only live under `tests/fixtures/` with explicit owner approval.
 - Runtime state, traces, workspace metadata, caches, and secrets do not land in
   the first baseline.
 
 ## Source Mapping
 
-Shape B / Machine Spirit local copy maps as:
+Shape B / plugin-docs local copy maps as:
 
 - `index.mjs` -> `plugin/index.mjs`
 - `openclaw.plugin.json` -> `plugin/openclaw.plugin.json`

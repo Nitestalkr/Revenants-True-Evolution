@@ -8,10 +8,14 @@ const { createRevenantsObserver } = require('../../plugin/core/observer');
 
 async function main() {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'revenants-dedupe-'));
+  const mutationRoot = path.join(tempRoot, 'workspace');
+  fs.mkdirSync(mutationRoot, { recursive: true });
+  fs.writeFileSync(path.join(mutationRoot, 'AGENTS.md'), '# Agent Notes\n');
   const observer = createRevenantsObserver({
     rootDir: path.join(tempRoot, 'state'),
     pluginConfig: {
       dataDir: path.join(tempRoot, 'state'),
+      mutationRoot,
       queueMemoryProposals: true,
       proposalCooldownMs: 60 * 60 * 1000,
     },

@@ -4,7 +4,7 @@
  * Monitor Suite — orchestrator for all continuous monitors
  *
  * Wires together: BoredomMonitor, StabilityMonitor, optional ArXivMonitor as
- * research-evolution source, optional LegacyCronSignalMonitor,
+ * research-evolution source, optional HistoricalSchedulerSignalMonitor,
  * SystemHealthMonitor, AlertSystem
  *
  * Usage:
@@ -17,7 +17,7 @@ const EventEmitter = require('events');
 const BoredomMonitor = require('./boredom-monitor');
 const StabilityMonitor = require('./stability-monitor');
 const ArXivMonitor = require('./arxiv-monitor');
-const LegacyCronSignalMonitor = require('./cron-health-monitor');
+const HistoricalSchedulerSignalMonitor = require('./historical-scheduler-signal-monitor');
 const SystemHealthMonitor = require('./system-health-monitor');
 const AlertSystem = require('./alert-system');
 
@@ -38,8 +38,9 @@ class MonitorSuite extends EventEmitter {
           ...(opts.researchEvolution ?? {}),
         })
       : null;
-    this.legacyCronSignals = opts.legacyCronSignals?.enabled === true
-      ? new LegacyCronSignalMonitor({ ...shared, ...(opts.legacyCronSignals ?? {}) })
+    const historicalSchedulerSignalsConfig = opts.historicalSchedulerSignals ?? opts.legacyCronSignals ?? {};
+    this.historicalSchedulerSignals = historicalSchedulerSignalsConfig.enabled === true
+      ? new HistoricalSchedulerSignalMonitor({ ...shared, ...historicalSchedulerSignalsConfig, enabled: true })
       : null;
     this.systemHealth = new SystemHealthMonitor({
       ...shared,
@@ -59,7 +60,7 @@ class MonitorSuite extends EventEmitter {
     this.boredom.start();
     this.stability.start();
     if (this.arxiv) this.arxiv.start();
-    if (this.legacyCronSignals) this.legacyCronSignals.start();
+    if (this.historicalSchedulerSignals) this.historicalSchedulerSignals.start();
     this.systemHealth.start();
 
     this.emit('started', { ts: new Date().toISOString() });
@@ -73,7 +74,7 @@ class MonitorSuite extends EventEmitter {
     this.boredom.stop();
     this.stability.stop();
     if (this.arxiv) this.arxiv.stop();
-    if (this.legacyCronSignals) this.legacyCronSignals.stop();
+    if (this.historicalSchedulerSignals) this.historicalSchedulerSignals.stop();
     this.systemHealth.stop();
 
     this.emit('stopped', { ts: new Date().toISOString() });
@@ -89,11 +90,11 @@ class MonitorSuite extends EventEmitter {
     this.alerts.unsubscribe(sessionId);
   }
 
-  /** Convenience: report a historical cron-era migration signal when enabled. */
-  legacyCronStart(jobName) { this.legacyCronSignals?.reportStart(jobName); }
-  legacyCronSuccess(jobName, meta) { this.legacyCronSignals?.reportSuccess(jobName, meta); }
-  legacyCronFailure(jobName, reason, meta) { this.legacyCronSignals?.reportFailure(jobName, reason, meta); }
-  legacyCronTimeout(jobName, durationMs) { this.legacyCronSignals?.reportTimeout(jobName, durationMs); }
+  /** Convenience: report a historical scheduler-era migration signal when enabled. */
+  historicalSchedulerStart(jobName) { this.historicalSchedulerSignals?.reportStart(jobName); }
+  historicalSchedulerSuccess(jobName, meta) { this.historicalSchedulerSignals?.reportSuccess(jobName, meta); }
+  historicalSchedulerFailure(jobName, reason, meta) { this.historicalSchedulerSignals?.reportFailure(jobName, reason, meta); }
+  historicalSchedulerTimeout(jobName, durationMs) { this.historicalSchedulerSignals?.reportTimeout(jobName, durationMs); }
 
   /** Convenience: signal user activity for boredom suppression */
   userActive() { this.boredom.onUserActivity(); }
@@ -114,9 +115,9 @@ class MonitorSuite extends EventEmitter {
       stability: this.stability.getState(),
       researchEvolution,
       arxiv: researchEvolution,
-      legacyCronSignals: this.legacyCronSignals
-        ? this.legacyCronSignals.getState()
-        : { enabled: false, reason: 'plugin-native runtime; cron is historical reference only' },
+      historicalSchedulerSignals: this.historicalSchedulerSignals
+        ? this.historicalSchedulerSignals.getState()
+        : { enabled: false, reason: 'plugin-native runtime; scheduler migration signals are historical reference only' },
       systemHealth: this.systemHealth.getState(),
       alerts: this.alerts.getAlerts(10),
     };
@@ -131,7 +132,7 @@ class MonitorSuite extends EventEmitter {
     this.alerts.attachMonitor('boredom', this.boredom);
     this.alerts.attachMonitor('stability', this.stability);
     if (this.arxiv) this.alerts.attachMonitor('researchEvolution', this.arxiv);
-    if (this.legacyCronSignals) this.alerts.attachMonitor('legacyCronSignals', this.legacyCronSignals);
+    if (this.historicalSchedulerSignals) this.alerts.attachMonitor('historicalSchedulerSignals', this.historicalSchedulerSignals);
     this.alerts.attachMonitor('systemHealth', this.systemHealth);
 
     // Bubble alert events up from suite

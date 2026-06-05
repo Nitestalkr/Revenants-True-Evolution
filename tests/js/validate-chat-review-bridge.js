@@ -8,8 +8,11 @@ const path = require('path');
 async function main() {
   const plugin = (await import('../../plugin/index.mjs')).default;
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'revenants-chat-bridge-'));
+  const mutationRoot = path.join(tempRoot, 'workspace');
   const fakeBinDir = path.join(tempRoot, 'bin');
   const sentArgsFile = path.join(tempRoot, 'sent-args.jsonl');
+  fs.mkdirSync(mutationRoot, { recursive: true });
+  fs.writeFileSync(path.join(mutationRoot, 'AGENTS.md'), '# Agent Notes\n');
   fs.mkdirSync(fakeBinDir, { recursive: true });
 
   const fakeOpenclaw = path.join(fakeBinDir, 'openclaw');
@@ -28,6 +31,7 @@ async function main() {
   try {
     const api = createFakeApi({
       dataDir: path.join(tempRoot, 'state'),
+      mutationRoot,
       queueMemoryProposals: true,
       notifySessionOnProposal: true,
     });
