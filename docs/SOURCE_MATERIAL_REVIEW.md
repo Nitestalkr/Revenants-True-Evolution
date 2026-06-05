@@ -1,14 +1,14 @@
 # Source Material Review
 
-This review records the cross-exam Josh requested before expanding Revenants to
-the wider agent team.
+This review records the source-material cross-exam completed before expanding
+Revenants to the wider agent team.
 
 ## Status
 
 - Baseline: `main` at `6bbd046`.
 - Scope: resource material only.
 - Output shape: inherit, reject, clarify.
-- No implementation lane starts until Josh signs off on this review.
+- No implementation lane starts until owner signoff completes for this review.
 
 ## Source Set
 

@@ -8,8 +8,11 @@ const path = require('path');
 async function main() {
   const plugin = (await import('../../plugin/index.mjs')).default;
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'revenants-chat-bridge-'));
+  const mutationRoot = path.join(tempRoot, 'workspace');
   const fakeBinDir = path.join(tempRoot, 'bin');
   const sentArgsFile = path.join(tempRoot, 'sent-args.jsonl');
+  fs.mkdirSync(mutationRoot, { recursive: true });
+  fs.writeFileSync(path.join(mutationRoot, 'AGENTS.md'), '# Agent Notes\n');
   fs.mkdirSync(fakeBinDir, { recursive: true });
 
   const fakeOpenclaw = path.join(fakeBinDir, 'openclaw');
@@ -28,6 +31,7 @@ async function main() {
   try {
     const api = createFakeApi({
       dataDir: path.join(tempRoot, 'state'),
+      mutationRoot,
       queueMemoryProposals: true,
       notifySessionOnProposal: true,
     });
@@ -46,6 +50,14 @@ async function main() {
     }, {});
     await api.hooks.after_tool_call({
       sessionId: 's-1',
+      sessionKey: 'agent:main:discord:channel:1473342935373447372',
+      toolName: 'web_fetch',
+      status: 'failed',
+      error: 'blocked',
+      durationMs: 50,
+    }, {});
+    await api.hooks.after_tool_call({
+      sessionId: 's-1b',
       sessionKey: 'agent:main:discord:channel:1473342935373447372',
       toolName: 'web_fetch',
       status: 'failed',
@@ -80,7 +92,7 @@ async function main() {
     const messageFlagIndex = approvalMessage.indexOf('--message');
     assert.ok(messageFlagIndex >= 0, 'bridge reply should send a chat message');
     assert.ok(approvalMessage[messageFlagIndex + 1].includes('Revenants approved'), 'bridge reply should confirm approval');
-    assert.ok(approvalMessage[messageFlagIndex + 1].includes('Routed as policy -> AGENTS.md via doc-patch.'), 'bridge reply should include mutation routing');
+    assert.ok(approvalMessage[messageFlagIndex + 1].includes('Routed as tooling -> TOOLS.md via doc-patch.'), 'bridge reply should include mutation routing');
 
     console.log('chat review bridge validation passed');
   } finally {

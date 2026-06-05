@@ -31,12 +31,21 @@ async function main() {
     error: 'blocked',
     durationMs: 15,
   }, {});
+  await readerApi.hooks.after_tool_call({
+    sessionId: 's-1b',
+    sessionKey: 'agent:main:discord:channel:1473342935373447372',
+    toolName: 'web_fetch',
+    status: 'failed',
+    error: 'blocked',
+    durationMs: 15,
+  }, {});
 
   const statusTool = readerApi.tools.find((tool) => tool.name === 'revenants_status');
   const status = JSON.parse((await statusTool.execute({ limit: 5 })).content[0].text);
 
-  assert.strictEqual(status.state.counters.toolFailuresObserved, 1, 'shared observer should count failures from later registrations');
+  assert.strictEqual(status.state.counters.toolFailuresObserved, 2, 'shared observer should count failures from later registrations');
   assert.ok(status.queuedPromotions.length >= 1, 'shared observer should queue promotions from later registration hooks');
+  assert.strictEqual(status.queuedPromotions.at(-1)?.proposalType, 'tooling');
 
   await writerApi.services[0].stop();
 

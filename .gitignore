@@ -9,6 +9,7 @@ data/
 logs/
 tmp/
 *.log
+.backup/
 
 # Python cache/test state
 __pycache__/

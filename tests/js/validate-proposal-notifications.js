@@ -8,29 +8,14 @@ const path = require('path');
 async function main() {
   const plugin = (await import('../../plugin/index.mjs')).default;
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'revenants-proposals-'));
-  const fakeBinDir = path.join(tempRoot, 'bin');
-  const sentArgsFile = path.join(tempRoot, 'sent-args.json');
-  fs.mkdirSync(fakeBinDir, { recursive: true });
-
-  const fakeOpenclaw = path.join(fakeBinDir, 'openclaw');
-  fs.writeFileSync(fakeOpenclaw, [
-    '#!/usr/bin/env node',
-    'const fs = require("fs");',
-    `fs.writeFileSync(${JSON.stringify(sentArgsFile)}, JSON.stringify(process.argv.slice(2), null, 2));`,
-    'process.exit(0);',
-    '',
-  ].join('\n'));
-  fs.chmodSync(fakeOpenclaw, 0o755);
-
-  const previousPath = process.env.PATH;
-  process.env.PATH = `${fakeBinDir}:${previousPath || ''}`;
+  const sentPayloadFile = path.join(tempRoot, 'sent-payload.json');
 
   try {
     const api = createFakeApi({
       dataDir: path.join(tempRoot, 'state'),
       queueMemoryProposals: true,
       notifySessionOnProposal: true,
-    });
+    }, sentPayloadFile);
 
     plugin.register(api);
 
@@ -65,19 +50,11 @@ async function main() {
 
     await delay(200);
 
-    const sentArgs = JSON.parse(fs.readFileSync(sentArgsFile, 'utf8'));
-    assert.deepStrictEqual(sentArgs.slice(0, 6), [
-      'message',
-      'send',
-      '--channel',
-      'discord',
-      '--target',
-      'channel:1473342935373447372',
-    ], 'proposal notification should route back to the active Discord channel');
-    assert.ok(sentArgs.includes('--reply-to'), 'proposal notification should thread off the triggering message when available');
-    const messageFlagIndex = sentArgs.indexOf('--message');
-    assert.ok(messageFlagIndex >= 0, 'proposal notification should include message text');
-    const message = sentArgs[messageFlagIndex + 1];
+    const sentPayload = JSON.parse(fs.readFileSync(sentPayloadFile, 'utf8'));
+    assert.strictEqual(sentPayload.channel, 'discord', 'proposal notification should route back to the active Discord channel');
+    assert.strictEqual(sentPayload.target, 'channel:1473342935373447372', 'proposal notification should target the active Discord channel');
+    assert.strictEqual(sentPayload.replyToId, '1511775773076230174', 'proposal notification should thread off the triggering message when available');
+    const message = sentPayload.message;
     assert.ok(message.includes('Revenants proposal queued'), 'proposal notification should announce queued proposal');
     assert.ok(message.includes('revenants approve'), 'proposal notification should include in-chat approval guidance');
     assert.ok(message.includes('Type: runtime -> runtime-config'), 'proposal notification should include typed routing');
@@ -110,12 +87,11 @@ async function main() {
 
     console.log('✓ proposal notification validation passed');
   } finally {
-    process.env.PATH = previousPath;
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
 }
 
-function createFakeApi(pluginConfig) {
+function createFakeApi(pluginConfig, sentPayloadFile) {
   return {
     pluginConfig,
     services: [],
@@ -127,6 +103,9 @@ function createFakeApi(pluginConfig) {
       info() {},
       warn() {},
       error() {},
+    },
+    async sendMessage(payload) {
+      fs.writeFileSync(sentPayloadFile, JSON.stringify(payload, null, 2));
     },
     registerService(service) {
       this.services.push(service);

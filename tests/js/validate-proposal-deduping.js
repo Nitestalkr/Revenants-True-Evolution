@@ -8,10 +8,14 @@ const { createRevenantsObserver } = require('../../plugin/core/observer');
 
 async function main() {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'revenants-dedupe-'));
+  const mutationRoot = path.join(tempRoot, 'workspace');
+  fs.mkdirSync(mutationRoot, { recursive: true });
+  fs.writeFileSync(path.join(mutationRoot, 'AGENTS.md'), '# Agent Notes\n');
   const observer = createRevenantsObserver({
     rootDir: path.join(tempRoot, 'state'),
     pluginConfig: {
       dataDir: path.join(tempRoot, 'state'),
+      mutationRoot,
       queueMemoryProposals: true,
       proposalCooldownMs: 60 * 60 * 1000,
     },
@@ -28,7 +32,7 @@ async function main() {
   }, {});
 
   let queue = observer.reviewQueue('peek', { limit: 10 });
-  assert.strictEqual(queue.queuedCount, 1, 'first policy failure should queue one proposal');
+  assert.strictEqual(queue.queuedCount, 0, 'first web_fetch access-constraint failure should not queue yet');
 
   observer.recordHook('after_tool_call', {
     sessionId: 's-2',
@@ -39,7 +43,9 @@ async function main() {
   }, {});
 
   queue = observer.reviewQueue('peek', { limit: 10 });
-  assert.strictEqual(queue.queuedCount, 1, 'identical policy proposal should be suppressed during cooldown');
+  assert.strictEqual(queue.queuedCount, 1, 'second identical web_fetch access-constraint failure should queue one tooling proposal');
+  assert.strictEqual(queue.recent.at(-1).proposalType, 'tooling');
+  assert.strictEqual(queue.recent.at(-1).mutationTarget, 'TOOLS.md');
 
   observer.recordHook('after_tool_call', {
     sessionId: 's-3',
@@ -78,7 +84,7 @@ async function main() {
   }, {});
 
   queue = observer.reviewQueue('peek', { limit: 10 });
-  assert.strictEqual(queue.queuedCount, 1, 'recently approved duplicate should stay suppressed during cooldown');
+  assert.strictEqual(queue.queuedCount, 1, 'recently approved duplicate tooling proposal should stay suppressed during cooldown');
 
   console.log('proposal deduping validation passed');
 }

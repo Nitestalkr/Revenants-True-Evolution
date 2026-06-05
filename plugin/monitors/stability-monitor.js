@@ -30,7 +30,7 @@ class StabilityMonitor extends EventEmitter {
     this._timer = null;
     this._alerts = [];
     this._history = [];
-    this._legacyCronStatuses = {};
+    this._historicalSchedulerStatuses = {};
   }
 
   start() {
@@ -49,15 +49,15 @@ class StabilityMonitor extends EventEmitter {
     this.emit('stopped');
   }
 
-  /** Update historical cron-era status from an external migration-review source. */
-  updateLegacyCronStatus(jobName, status) {
-    this._legacyCronStatuses[jobName] = {
+  /** Update historical scheduler-era status from an external migration-review source. */
+  updateHistoricalSchedulerStatus(jobName, status) {
+    this._historicalSchedulerStatuses[jobName] = {
       ...status,
       updatedAt: new Date().toISOString(),
     };
     if (status.failed) {
       const alert = {
-        type: 'legacy_cron_failure',
+        type: 'historical_scheduler_failure',
         job: jobName,
         reason: status.reason ?? 'unknown',
         ts: new Date().toISOString(),
@@ -67,12 +67,16 @@ class StabilityMonitor extends EventEmitter {
     }
   }
 
+  updateLegacyCronStatus(jobName, status) {
+    this.updateHistoricalSchedulerStatus(jobName, status);
+  }
+
   getState() {
     return {
       memory: this._getMemoryMetrics(),
       cpu: this._getCpuMetrics(),
       disk: this._getDiskMetrics(),
-      legacyCronSignals: this._legacyCronStatuses,
+      historicalSchedulerSignals: this._historicalSchedulerStatuses,
       alertCount: this._alerts.length,
       ts: new Date().toISOString(),
     };
@@ -165,7 +169,7 @@ class StabilityMonitor extends EventEmitter {
       fs.writeFileSync(this.dataFile, JSON.stringify({
         current: this.getState(),
         history: this._history.slice(-6),
-        legacyCronSignals: this._legacyCronStatuses,
+        historicalSchedulerSignals: this._historicalSchedulerStatuses,
         ts: new Date().toISOString(),
       }, null, 2));
     } catch (_) { /* non-fatal */ }

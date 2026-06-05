@@ -1,11 +1,11 @@
 'use strict';
 
-const fs = require('fs');
 const path = require('path');
 const DataStore = require('./data-store');
 const MonitorSuite = require('../monitors/monitor-suite');
 const { normalizeHookTrace, buildPromotion } = require('./trace-normalizer');
 const { resolveRuntimeRoot } = require('./storage-paths');
+const { createPromotionApplier, classifyRuntimeHandling } = require('./promotion-applier');
 
 const DEFAULT_HOOKS = [
   'gateway_start',
@@ -48,6 +48,12 @@ class RevenantsObserver {
     this.rootDir = resolveRuntimeRoot({ ...this.pluginConfig, dataDir: ctx.rootDir || this.pluginConfig.dataDir });
     this.mutationRoot = resolveMutationRoot(this.rootDir, this.pluginConfig);
     this.store = new DataStore(this.rootDir);
+    this.promotionApplier = ctx.promotionApplier || createPromotionApplier({
+      store: this.store,
+      mutationRoot: this.mutationRoot,
+      notifyQueuedPromotion: (promotion, trace) => this.notifyQueuedPromotion(promotion, trace),
+      readNotificationSessionKey: (promotionId) => this.store.readState()?.notifications?.sentPromotions?.[promotionId]?.sessionKey || null,
+    });
     this.suite = null;
     this.started = false;
     this.startRefCount = 0;
@@ -202,6 +208,7 @@ class RevenantsObserver {
   shouldPromoteToolFailure(trace) {
     const handling = classifyRuntimeHandling(
       trace?.metadata?.error || trace?.metadata?.status || '',
+      { toolName: trace?.metadata?.toolName || '' },
     );
     const clusterCount = countRecentFailureCluster(this.store, trace, this.pluginConfig);
     const threshold = thresholdForFailureHandling(handling, this.pluginConfig);
@@ -264,7 +271,7 @@ class RevenantsObserver {
         decision,
       }, { retain });
       const appliedMutations = decision === 'approve'
-        ? result.acknowledged.map((promotion) => this.applyApprovedPromotion(promotion, {
+        ? result.acknowledged.map((promotion) => this.promotionApplier.apply(promotion, {
           reviewer: opts.reviewer || 'agent',
           note: opts.note,
         }))
@@ -334,109 +341,6 @@ class RevenantsObserver {
     } catch (error) {
       this.logger?.warn?.(`revenants: proposal notification failed: ${error?.message || error}`);
     }
-  }
-
-  applyApprovedPromotion(promotion, meta = {}) {
-    const appliedAt = new Date().toISOString();
-    const baseRecord = {
-      proposalId: promotion.id,
-      proposalType: promotion.proposalType,
-      mutationTarget: promotion.mutationTarget,
-      applyMode: promotion.applyMode,
-      appliedAt,
-      reviewer: meta.reviewer || 'agent',
-      note: meta.note || null,
-      status: 'noop',
-      details: null,
-    };
-
-    if (promotion.proposalType === 'research' || promotion.applyMode === 'proposal-only') {
-      const followUp = createTranslatedResearchPromotion(promotion, appliedAt);
-      this.store.appendPromotion(followUp);
-      this.store.appendTrace({
-        id: `${followUp.id}-trace`,
-        timestamp: appliedAt,
-        signalType: 'research',
-        source: 'revenants',
-        target: followUp.mutationTarget,
-        action: 'research_translation',
-        result: 'success',
-        impactScore: followUp.impactScore,
-        metadata: {
-          sourceProposalId: promotion.id,
-          suggestedMutationTarget: promotion?.researchAssessment?.suggestedMutationTarget || null,
-        },
-      });
-      void this.notifyQueuedPromotion(followUp, {
-        sessionKey: this.store.readState()?.notifications?.sentPromotions?.[promotion.id]?.sessionKey || null,
-        metadata: {
-          sourceProposalId: promotion.id,
-        },
-      });
-      const record = {
-        ...baseRecord,
-        status: 'translated',
-        details: `Queued translated follow-up proposal ${followUp.id} for ${followUp.mutationTarget}.`,
-        translatedProposalId: followUp.id,
-      };
-      this.store.appendAppliedMutation(record);
-      return record;
-    }
-
-    if (promotion.applyMode === 'config-patch') {
-      const runtimeConfig = this.store.readRuntimeConfig();
-      const toolName = promotion?.evidence?.metadata?.toolName || 'unknown-tool';
-      const error = String(promotion?.evidence?.metadata?.error || promotion?.evidence?.metadata?.status || 'unspecified failure');
-      runtimeConfig.toolPolicies[toolName] = {
-        lastUpdatedAt: appliedAt,
-        sourceProposalId: promotion.id,
-        recommendedHandling: classifyRuntimeHandling(error),
-        reason: promotion.summary,
-      };
-      runtimeConfig.appliedProposals[promotion.id] = {
-        appliedAt,
-        target: promotion.mutationTarget,
-      };
-      this.store.writeRuntimeConfig(runtimeConfig);
-      const record = {
-        ...baseRecord,
-        status: 'applied',
-        details: `Updated runtime-config policy for ${toolName}.`,
-      };
-      this.store.appendAppliedMutation(record);
-      return record;
-    }
-
-    if (promotion.applyMode === 'doc-patch' || promotion.applyMode === 'memory-update') {
-      const targetPath = resolveMutationTargetPath(this.mutationRoot, promotion.mutationTarget);
-      ensureParentDir(targetPath);
-      if (!fs.existsSync(targetPath)) {
-        fs.writeFileSync(targetPath, defaultDocumentBody(promotion.mutationTarget));
-      }
-      fs.appendFileSync(targetPath, renderMutationEntry(promotion, appliedAt));
-      const record = {
-        ...baseRecord,
-        status: 'applied',
-        details: `Appended mutation guidance to ${promotion.mutationTarget}.`,
-      };
-      this.store.appendAppliedMutation(record);
-      return record;
-    }
-
-    this.store.appendImplementationTask({
-      proposalId: promotion.id,
-      createdAt: appliedAt,
-      summary: promotion.summary,
-      mutationTarget: promotion.mutationTarget,
-      evidence: promotion.evidence,
-    });
-    const record = {
-      ...baseRecord,
-      status: 'applied',
-      details: 'Queued implementation task from approved proposal.',
-    };
-    this.store.appendAppliedMutation(record);
-    return record;
   }
 
   maybeQueueAutoWork(trace, opts = {}) {
@@ -892,6 +796,7 @@ function describeFailureCluster(trace, store, pluginConfig) {
   if (!toolName) return null;
   const normalizedFailureClass = classifyRuntimeHandling(
     trace?.metadata?.error || trace?.metadata?.status || '',
+    { toolName: trace?.metadata?.toolName || '' },
   );
   return {
     toolName,
@@ -909,6 +814,7 @@ function findRelatedRuntimePromotion(promotions, failureCluster) {
     if (toolName !== String(failureCluster?.toolName || '')) continue;
     const normalizedFailureClass = classifyRuntimeHandling(
       entry?.evidence?.metadata?.error || entry?.evidence?.metadata?.status || '',
+      { toolName: entry?.evidence?.metadata?.toolName || '' },
     );
     if (normalizedFailureClass !== failureCluster?.normalizedFailureClass) continue;
     return entry;
@@ -921,6 +827,7 @@ function countRecentFailureCluster(store, trace, pluginConfig) {
   const windowMs = resolveFailureClusterWindowMs(pluginConfig);
   const handling = classifyRuntimeHandling(
     trace?.metadata?.error || trace?.metadata?.status || '',
+    { toolName: trace?.metadata?.toolName || '' },
   );
   const toolName = String(trace?.metadata?.toolName || '');
   const currentTime = new Date(trace?.timestamp || Date.now()).getTime();
@@ -931,6 +838,7 @@ function countRecentFailureCluster(store, trace, pluginConfig) {
     if (String(entry?.metadata?.toolName || '') !== toolName) continue;
     const entryHandling = classifyRuntimeHandling(
       entry?.metadata?.error || entry?.metadata?.status || '',
+      { toolName: entry?.metadata?.toolName || '' },
     );
     if (entryHandling !== handling) continue;
     const timestamp = new Date(entry?.timestamp || 0).getTime();
@@ -952,6 +860,9 @@ function thresholdForFailureHandling(handling, pluginConfig) {
   const configured = pluginConfig?.failureClusterThresholds || {};
   if (handling === 'avoid-repeat-and-escalate') {
     return Number(configured.policy ?? 1);
+  }
+  if (handling === 'document-tool-constraint-and-escalate') {
+    return Number(configured.toolingPolicy ?? 2);
   }
   if (handling === 'increase-timeout-and-retry-carefully') {
     return Number(configured.timeout ?? 2);
@@ -1068,42 +979,6 @@ function resolveMutationRoot(rootDir, pluginConfig) {
   return path.resolve(__dirname, '..', '..');
 }
 
-function resolveMutationTargetPath(rootDir, mutationTarget) {
-  return path.join(rootDir, mutationTarget);
-}
-
-function ensureParentDir(filePath) {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-}
-
-function defaultDocumentBody(mutationTarget) {
-  if (mutationTarget === 'MEMORY.md') return '# Memory\n';
-  if (mutationTarget === 'TOOLS.md') return '# Tools\n';
-  if (mutationTarget === 'SOUL.md') return '# Soul\n';
-  return '# Agent Notes\n';
-}
-
-function renderMutationEntry(promotion, appliedAt) {
-  const lines = [
-    '',
-    `## Mutation ${promotion.id}`,
-    '',
-    `- Applied: ${appliedAt}`,
-    `- Intent: ${promotion.intent}`,
-    `- Type: ${promotion.proposalType}`,
-    `- Reason: ${promotion.summary}`,
-  ];
-  if (promotion.mutationPlan?.summary) lines.push(`- Apply path: ${promotion.mutationPlan.summary}`);
-  return `${lines.join('\n')}\n`;
-}
-
-function classifyRuntimeHandling(errorText) {
-  const text = String(errorText || '').toLowerCase();
-  if (/timeout/.test(text)) return 'increase-timeout-and-retry-carefully';
-  if (/blocked|denied|forbidden|unauthor|private/.test(text)) return 'avoid-repeat-and-escalate';
-  return 'monitor-and-tune';
-}
-
 function promotionSignature(entry) {
   const toolName = entry?.evidence?.metadata?.toolName || entry?.toolName || '';
   const errorText = String(
@@ -1112,7 +987,7 @@ function promotionSignature(entry) {
       || entry?.details
       || '',
   ).toLowerCase();
-  const normalizedError = classifyRuntimeHandling(errorText);
+  const normalizedError = classifyRuntimeHandling(errorText, { toolName });
   const sourcePaper = entry?.researchAssessment?.sourcePaper?.title
     || entry?.evidence?.metadata?.sourcePaperTitle
     || '';
@@ -1126,96 +1001,6 @@ function promotionSignature(entry) {
     normalizedError,
     sourcePaper,
   ].join('::');
-}
-
-function createTranslatedResearchPromotion(promotion, appliedAt) {
-  const mutationTarget = promotion?.researchAssessment?.suggestedMutationTarget || 'implementation-task';
-  const route = routeForMutationTarget(mutationTarget);
-  const paperTitle = promotion?.researchAssessment?.sourcePaper?.title || 'research insight';
-  return {
-    id: `${promotion.id}-followup`,
-    timestamp: appliedAt,
-    traceId: promotion.traceId,
-    signalType: 'research',
-    source: 'revenants',
-    target: 'libravdb-review-queue',
-    intent: 'translate-research-insight',
-    impactScore: promotion.impactScore,
-    summary: `Translated research insight from ${paperTitle} into a concrete ${route.type} proposal`,
-    proposalType: route.type,
-    mutationTarget: route.target,
-    applyMode: route.applyMode,
-    validationRequired: route.validationRequired,
-    autoApplyEligible: false,
-    mutationPlan: {
-      rationale: `Research insight approved first; this follow-up isolates the concrete local mutation for separate review.`,
-      summary: route.summary,
-    },
-    evidence: {
-      action: 'research_translation',
-      result: 'success',
-      metadata: {
-        sourceProposalId: promotion.id,
-        sourcePaperTitle: paperTitle,
-      },
-    },
-    parentProposalId: promotion.id,
-  };
-}
-
-function routeForMutationTarget(target) {
-  if (target === 'AGENTS.md') {
-    return {
-      type: 'policy',
-      target,
-      applyMode: 'doc-patch',
-      validationRequired: ['human-review'],
-      summary: 'Patch AGENTS.md with the approved research-derived policy or reasoning guidance.',
-    };
-  }
-  if (target === 'TOOLS.md') {
-    return {
-      type: 'tooling',
-      target,
-      applyMode: 'doc-patch',
-      validationRequired: ['human-review'],
-      summary: 'Patch TOOLS.md with the approved research-derived tool workflow guidance.',
-    };
-  }
-  if (target === 'SOUL.md') {
-    return {
-      type: 'personality',
-      target,
-      applyMode: 'doc-patch',
-      validationRequired: ['human-review'],
-      summary: 'Patch SOUL.md with the approved research-derived persona adjustment.',
-    };
-  }
-  if (target === 'MEMORY.md') {
-    return {
-      type: 'memory',
-      target,
-      applyMode: 'memory-update',
-      validationRequired: ['human-review'],
-      summary: 'Update MEMORY.md with the approved research-derived durable context.',
-    };
-  }
-  if (target === 'runtime-config') {
-    return {
-      type: 'runtime',
-      target,
-      applyMode: 'config-patch',
-      validationRequired: ['schema', 'rollback', 'human-review'],
-      summary: 'Prepare a validated runtime/config patch derived from the approved research insight.',
-    };
-  }
-  return {
-    type: 'implementation',
-    target: 'implementation-task',
-    applyMode: 'task',
-    validationRequired: ['human-review'],
-    summary: 'Convert the approved research insight into an implementation task for separate execution.',
-  };
 }
 
 function ensureSessionRoutes(state) {

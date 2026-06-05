@@ -24,9 +24,9 @@ apply changes silently.
 
 ## Current Baseline
 
-This baseline contains the reconciled Machine Spirit plugin/docs lane and the
-Fedora Python prototype/task lane. The current comparison point for source
-review is `main` at `6bbd046`.
+This baseline contains the reconciled plugin/docs lane and the Fedora Python
+prototype/task lane. The current comparison point for source review is `main`
+at `6bbd046`.
 
 ## Layout
 

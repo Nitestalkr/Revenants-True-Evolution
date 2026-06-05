@@ -15,11 +15,7 @@ LibraVDB remains the memory/context authority.
 - Keep architecture, integration, handoff, and audit notes under `docs/`.
 - Do not commit runtime `data/`, traces, caches, logs, local env files, secrets,
   dependency folders, or workspace metadata.
-- Add fixtures only under `tests/fixtures/` after Josh explicitly approves them.
-
-## Owner Signoff
-
-Use "Josh" for Nitestalkr when referring to owner signoff in project notes.
+- Add fixtures only under `tests/fixtures/` after explicit owner approval.
 
 ## Mutation 2c2bec1533b8677e
 

@@ -89,7 +89,7 @@ delivery
 - Local runtime files for traces, state, and promotion queues
 - Structured for auditability and agent consumption
 - Pre-processed for lean payloads
-- Excluded from the repository unless Josh explicitly approves a small fixture
+- Excluded from the repository unless explicit owner approval allows a small fixture
 
 ## Migration Path
 
