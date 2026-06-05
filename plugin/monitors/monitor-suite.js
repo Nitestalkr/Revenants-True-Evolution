@@ -42,6 +42,7 @@ class MonitorSuite extends EventEmitter {
     this.historicalSchedulerSignals = historicalSchedulerSignalsConfig.enabled === true
       ? new HistoricalSchedulerSignalMonitor({ ...shared, ...historicalSchedulerSignalsConfig, enabled: true })
       : null;
+    this.legacyCronSignals = this.historicalSchedulerSignals;
     this.systemHealth = new SystemHealthMonitor({
       ...shared,
       gatewayUrl: opts.gatewayUrl ?? 'http://localhost:3000',
@@ -96,6 +97,12 @@ class MonitorSuite extends EventEmitter {
   historicalSchedulerFailure(jobName, reason, meta) { this.historicalSchedulerSignals?.reportFailure(jobName, reason, meta); }
   historicalSchedulerTimeout(jobName, durationMs) { this.historicalSchedulerSignals?.reportTimeout(jobName, durationMs); }
 
+  /** Compatibility aliases for older legacy-cron callers. */
+  legacyCronStart(jobName) { this.historicalSchedulerStart(jobName); }
+  legacyCronSuccess(jobName, meta) { this.historicalSchedulerSuccess(jobName, meta); }
+  legacyCronFailure(jobName, reason, meta) { this.historicalSchedulerFailure(jobName, reason, meta); }
+  legacyCronTimeout(jobName, durationMs) { this.historicalSchedulerTimeout(jobName, durationMs); }
+
   /** Convenience: signal user activity for boredom suppression */
   userActive() { this.boredom.onUserActivity(); }
   userIdle() { this.boredom.onUserIdle(); }
@@ -116,6 +123,9 @@ class MonitorSuite extends EventEmitter {
       researchEvolution,
       arxiv: researchEvolution,
       historicalSchedulerSignals: this.historicalSchedulerSignals
+        ? this.historicalSchedulerSignals.getState()
+        : { enabled: false, reason: 'plugin-native runtime; scheduler migration signals are historical reference only' },
+      legacyCronSignals: this.historicalSchedulerSignals
         ? this.historicalSchedulerSignals.getState()
         : { enabled: false, reason: 'plugin-native runtime; scheduler migration signals are historical reference only' },
       systemHealth: this.systemHealth.getState(),

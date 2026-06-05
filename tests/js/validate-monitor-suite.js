@@ -13,6 +13,7 @@ const MonitorSuite = require('../../plugin/monitors/monitor-suite');
 const BoredomMonitor = require('../../plugin/monitors/boredom-monitor');
 const HistoricalSchedulerSignalMonitor = require('../../plugin/monitors/historical-scheduler-signal-monitor');
 const AlertSystem = require('../../plugin/monitors/alert-system');
+const nodeAssert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -141,6 +142,17 @@ async function testMonitorSuite() {
 
     await delay(200);
 
+    nodeAssert.strictEqual(typeof suite.legacyCronStart, 'function');
+    assert(true, 'legacyCronStart alias exists');
+    nodeAssert.strictEqual(typeof suite.legacyCronSuccess, 'function');
+    assert(true, 'legacyCronSuccess alias exists');
+    nodeAssert.strictEqual(typeof suite.legacyCronFailure, 'function');
+    assert(true, 'legacyCronFailure alias exists');
+    nodeAssert.strictEqual(typeof suite.legacyCronTimeout, 'function');
+    assert(true, 'legacyCronTimeout alias exists');
+    nodeAssert.strictEqual(suite.legacyCronSignals, suite.historicalSchedulerSignals);
+    assert(true, 'legacyCronSignals property aliases historicalSchedulerSignals');
+
     const snapshot = suite.getSnapshot();
   assert(snapshot.ts != null, 'snapshot has ts');
   assert(snapshot.boredom != null, 'snapshot has boredom');
@@ -149,6 +161,9 @@ async function testMonitorSuite() {
   assert(snapshot.researchEvolution.enabled === false, 'research evolution lane disabled by default');
   assert(snapshot.historicalSchedulerSignals != null, 'snapshot has historicalSchedulerSignals');
   assert(snapshot.historicalSchedulerSignals.enabled === false, 'historical scheduler signals disabled by default');
+  assert(snapshot.legacyCronSignals != null, 'snapshot has legacyCronSignals alias');
+  nodeAssert.deepStrictEqual(snapshot.legacyCronSignals, snapshot.historicalSchedulerSignals);
+  assert(true, 'legacyCronSignals snapshot aliases historicalSchedulerSignals');
 
     const drained = suite.drainAlerts();
     const historicalSchedulerAlerts = drained.filter((alert) => String(alert?.type || '').startsWith('historical_scheduler_'));
