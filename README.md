@@ -22,6 +22,13 @@ Revenants now treats research ingestion as a separate optional lane:
 Both lanes feed the same human-reviewed proposal path. Neither lane should
 apply changes silently.
 
+Research-derived proposals can now carry explicit landing metadata for the
+current paper families under discussion:
+
+- `GRAM` -> observer salience and proposal-routing surfaces
+- `LDT` -> deliberation thresholds, queue gates, and runtime follow-up policy
+- `PTRM` -> paper-to-runtime translation and implementation handoff
+
 ## Current Baseline
 
 This baseline contains the reconciled plugin/docs lane and the Fedora Python

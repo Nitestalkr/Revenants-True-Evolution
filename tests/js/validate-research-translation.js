@@ -21,11 +21,11 @@ async function main() {
   observer.recordHook('monitor_alert', {
     type: 'arxiv_paper',
     paper: {
-      id: 'http://arxiv.org/abs/2506.12345',
-      title: 'A Global Workspace Agent Architecture for Tool Use',
-      summary: 'We present an agentic cognitive architecture with global workspace coordination, tool use, and evaluation benchmarks.',
-      published: '2026-06-01T00:00:00Z',
-      authors: ['Jane Doe', 'John Smith'],
+      id: 'http://arxiv.org/abs/2506.22345',
+      title: 'LDT: Layered Deliberation Thresholds for Runtime Escalation',
+      summary: 'We describe staged review, confidence gates, runtime escalation thresholds, and bounded follow-up policy for agent proposals.',
+      published: '2026-06-02T00:00:00Z',
+      authors: ['June Roe', 'Max Smith'],
     },
   }, {});
 
@@ -33,6 +33,8 @@ async function main() {
   const researchProposal = before.recent.at(-1);
   assert.ok(researchProposal, 'research proposal should be queued');
   assert.strictEqual(researchProposal.proposalType, 'research');
+  assert.deepStrictEqual(researchProposal.researchAssessment.frameworks, ['LDT']);
+  assert.strictEqual(researchProposal.researchAssessment.suggestedMutationTarget, 'runtime-config');
 
   const approve = observer.reviewQueue('approve', {
     ids: [researchProposal.id],
@@ -45,9 +47,10 @@ async function main() {
   const followUp = after.recent.at(-1);
   assert.ok(followUp, 'translated follow-up proposal should be queued');
   assert.strictEqual(followUp.id, approve.appliedMutations[0].translatedProposalId);
-  assert.strictEqual(followUp.proposalType, 'implementation');
-  assert.strictEqual(followUp.mutationTarget, 'implementation-task');
-  assert.strictEqual(followUp.applyMode, 'task');
+  assert.strictEqual(followUp.proposalType, 'runtime');
+  assert.strictEqual(followUp.mutationTarget, 'runtime-config');
+  assert.strictEqual(followUp.applyMode, 'config-patch');
+  assert.deepStrictEqual(followUp.researchAssessment.frameworks, ['LDT']);
 
   const applied = observer.store.readAppliedMutations(5);
   assert.strictEqual(applied.at(-1).translatedProposalId, followUp.id);

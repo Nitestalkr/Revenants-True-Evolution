@@ -88,8 +88,8 @@ function main() {
       alertType: 'arxiv_paper',
       paper: {
         id: 'http://arxiv.org/abs/2506.12345',
-        title: 'Attention Schema Tool Use Benchmarks',
-        summary: 'An agentic benchmark for attention schema and tool use evaluation.',
+        title: 'PTRM: Attention Schema Tool Use Benchmarks',
+        summary: 'A paper-to-runtime translation model for attention schema, tool use evaluation, and evidence-backed implementation translation.',
         published: '2026-06-01T00:00:00Z',
         authors: ['A. Researcher'],
       },
@@ -99,7 +99,12 @@ function main() {
   assert.strictEqual(researchPromotion.proposalType, 'research');
   assert.strictEqual(researchPromotion.mutationTarget, 'research-review');
   assert.strictEqual(researchPromotion.applyMode, 'proposal-only');
-  assert.strictEqual(researchPromotion.researchAssessment.sourcePaper.title, 'Attention Schema Tool Use Benchmarks');
+  assert.strictEqual(researchPromotion.researchAssessment.sourcePaper.title, 'PTRM: Attention Schema Tool Use Benchmarks');
+  assert.deepStrictEqual(researchPromotion.researchAssessment.frameworks, ['PTRM']);
+  assert.strictEqual(researchPromotion.researchAssessment.primaryFramework, 'PTRM');
+  assert.ok(researchPromotion.researchAssessment.landingZones.includes('plugin/monitors/arxiv-monitor.js'));
+  assert.ok(researchPromotion.researchAssessment.landingZones.includes('plugin/core/promotion-applier.js'));
+  assert.strictEqual(researchPromotion.researchAssessment.deliberationProfile.mode, 'translation-first');
   assert.strictEqual(researchPromotion.researchAssessment.expectedImpact, 'high');
 
   console.log('proposal routing validation passed');

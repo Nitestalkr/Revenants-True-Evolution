@@ -453,10 +453,16 @@ function redactPromotion(promotion) {
     } : undefined,
     researchAssessment: promotion.researchAssessment ? {
       sourcePaper: promotion.researchAssessment.sourcePaper,
+      frameworks: promotion.researchAssessment.frameworks,
+      primaryFramework: promotion.researchAssessment.primaryFramework,
+      landingZones: promotion.researchAssessment.landingZones,
+      gradientTargets: promotion.researchAssessment.gradientTargets,
+      deliberationProfile: promotion.researchAssessment.deliberationProfile,
       confidence: promotion.researchAssessment.confidence,
       novelty: promotion.researchAssessment.novelty,
       expectedImpact: promotion.researchAssessment.expectedImpact,
       suggestedMutationTarget: promotion.researchAssessment.suggestedMutationTarget,
+      rationale: promotion.researchAssessment.rationale,
     } : undefined,
     impactScore: promotion.impactScore,
     summary: promotion.summary,
@@ -590,6 +596,10 @@ function updateDriveScores(state, trace) {
   }
   if (trace.signalType === 'user_interaction') scores.helpfulness = clamp(scores.helpfulness + 0.03);
   if (trace.signalType === 'tooling') scores.goal_directed = clamp(scores.goal_directed + 0.02);
+  const frameworkIds = extractResearchFrameworkIds(trace);
+  if (frameworkIds.includes('GRAM')) scores.curiosity = clamp(scores.curiosity + 0.04);
+  if (frameworkIds.includes('LDT')) scores.safety = clamp(scores.safety + 0.03);
+  if (frameworkIds.includes('PTRM')) scores.goal_directed = clamp(scores.goal_directed + 0.03);
 }
 
 function updateGraoSignals(state, trace, promotion) {
@@ -597,6 +607,19 @@ function updateGraoSignals(state, trace, promotion) {
   if (trace.result === 'failure' && trace.signalType === 'tooling') gradients.add('tool-call-reliability');
   if (trace.signalType === 'memory') gradients.add('context-integrity');
   if (trace.signalType === 'runtime') gradients.add('runtime-stability');
+  const frameworkIds = extractResearchFrameworkIds(trace, promotion);
+  if (frameworkIds.includes('GRAM')) {
+    gradients.add('salience-broadcast');
+    gradients.add('proposal-routing');
+  }
+  if (frameworkIds.includes('LDT')) {
+    gradients.add('deliberation-thresholding');
+    gradients.add('review-gating');
+  }
+  if (frameworkIds.includes('PTRM')) {
+    gradients.add('research-translation');
+    gradients.add('evidence-traceability');
+  }
   state.grao.activeGradients = [...gradients].slice(-10);
   if (trace.result === 'failure') state.grao.knownFailureCount += 1;
   if (promotion) {
@@ -942,10 +965,16 @@ function formatProposalNotification(promotion, trace, route) {
   if (promotion.mutationPlan?.summary) lines.push(`Apply path: ${promotion.mutationPlan.summary}`);
   if (promotion.researchAssessment?.sourcePaper?.title) lines.push(`Source paper: ${promotion.researchAssessment.sourcePaper.title}`);
   if (promotion.researchAssessment) {
+    if (Array.isArray(promotion.researchAssessment.frameworks) && promotion.researchAssessment.frameworks.length > 0) {
+      lines.push(`Frameworks: ${promotion.researchAssessment.frameworks.join(', ')}`);
+    }
     lines.push(`Research confidence: ${Number(promotion.researchAssessment.confidence || 0).toFixed(2)}`);
     lines.push(`Research novelty: ${Number(promotion.researchAssessment.novelty || 0).toFixed(2)}`);
     lines.push(`Expected impact: ${promotion.researchAssessment.expectedImpact}`);
     lines.push(`Suggested target: ${promotion.researchAssessment.suggestedMutationTarget}`);
+    if (Array.isArray(promotion.researchAssessment.landingZones) && promotion.researchAssessment.landingZones.length > 0) {
+      lines.push(`Landing zones: ${promotion.researchAssessment.landingZones.join(', ')}`);
+    }
   }
   if (trace?.metadata?.toolName) lines.push(`Tool: ${trace.metadata.toolName}`);
   const clusterCount = Number(promotion?.evidence?.metadata?.clusterCount || 0);
@@ -971,6 +1000,23 @@ function impactToRiskLabel(score) {
   if (value >= 0.8) return 'high';
   if (value >= 0.5) return 'medium';
   return 'low';
+}
+
+function extractResearchFrameworkIds(trace, promotion) {
+  const researchAssessment = promotion?.researchAssessment || trace?.researchAssessment || null;
+  if (Array.isArray(researchAssessment?.frameworks) && researchAssessment.frameworks.length > 0) {
+    return researchAssessment.frameworks;
+  }
+  if (Array.isArray(trace?.metadata?.paperFrameworks) && trace.metadata.paperFrameworks.length > 0) {
+    return trace.metadata.paperFrameworks;
+  }
+  const paperText = `${trace?.metadata?.paper?.title || ''} ${trace?.metadata?.paper?.summary || ''}`.toUpperCase();
+  const inferred = [];
+  for (const frameworkId of ['GRAM', 'LDT', 'PTRM']) {
+    if (paperText.includes(frameworkId)) inferred.push(frameworkId);
+  }
+  if (inferred.length > 0) return inferred;
+  return [];
 }
 
 function resolveMutationRoot(rootDir, pluginConfig) {

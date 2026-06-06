@@ -168,6 +168,10 @@ function createTranslatedResearchPromotion(promotion, appliedAt) {
   const mutationTarget = promotion?.researchAssessment?.suggestedMutationTarget || 'implementation-task';
   const route = routeForMutationTarget(mutationTarget);
   const paperTitle = promotion?.researchAssessment?.sourcePaper?.title || 'research insight';
+  const frameworkSummary = Array.isArray(promotion?.researchAssessment?.frameworks)
+    && promotion.researchAssessment.frameworks.length > 0
+    ? ` (${promotion.researchAssessment.frameworks.join('/')})`
+    : '';
   return {
     id: `${promotion.id}-followup`,
     timestamp: appliedAt,
@@ -177,7 +181,7 @@ function createTranslatedResearchPromotion(promotion, appliedAt) {
     target: 'libravdb-review-queue',
     intent: 'translate-research-insight',
     impactScore: promotion.impactScore,
-    summary: `Translated research insight from ${paperTitle} into a concrete ${route.type} proposal`,
+    summary: `Translated research insight${frameworkSummary} from ${paperTitle} into a concrete ${route.type} proposal`,
     proposalType: route.type,
     mutationTarget: route.target,
     applyMode: route.applyMode,
@@ -193,8 +197,15 @@ function createTranslatedResearchPromotion(promotion, appliedAt) {
       metadata: {
         sourceProposalId: promotion.id,
         sourcePaperTitle: paperTitle,
+        sourceFrameworks: promotion?.researchAssessment?.frameworks || [],
+        landingZones: promotion?.researchAssessment?.landingZones || [],
       },
     },
+    researchAssessment: promotion?.researchAssessment
+      ? {
+          ...promotion.researchAssessment,
+        }
+      : undefined,
     parentProposalId: promotion.id,
   };
 }
