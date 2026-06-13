@@ -46,16 +46,14 @@ function applyConservationLaw(promotion, { pluginConfig } = {}) {
     violations.push({
       kind: 'mutation-target',
       value: next.mutationTarget || null,
-      action: 'rerouted-to-implementation-task',
+      action: 'blocked-until-boundary-is-expanded',
     });
-    next.mutationTarget = 'implementation-task';
-    next.applyMode = 'task';
-    next.proposalType = 'implementation';
+    next.applyMode = 'blocked';
     next.autoApplyEligible = false;
     next.validationRequired = uniqueStrings([
       ...next.validationRequired,
       'human-review',
-      'bounded-scope',
+      'conservation-law',
     ]);
   }
 
@@ -121,7 +119,9 @@ function prepareEvolutionProposal({ trace, promotion, state, pluginConfig } = {}
   const conservation = applyConservationLaw(attachPhysics(promotion, { pressure }), { pluginConfig });
   return {
     queued: true,
-    reason: 'pressure-and-conservation-passed',
+    reason: conservation.passed
+      ? 'pressure-and-conservation-passed'
+      : 'conservation-blocked-manual-review-only',
     pressure,
     conservation: {
       passed: conservation.passed,

@@ -29,6 +29,19 @@ function createPromotionApplier(ctx = {}) {
         details: null,
       };
 
+      if (promotion.applyMode === 'blocked' || promotion?.physics?.conservation?.passed === false) {
+        const violations = promotion?.physics?.conservation?.violations || [];
+        const record = {
+          ...baseRecord,
+          status: 'blocked',
+          details: violations.length > 0
+            ? `Conservation law blocked mutation: ${violations.map((violation) => `${violation.kind}:${violation.value}`).join(', ')}.`
+            : 'Conservation law blocked mutation.',
+        };
+        store.appendAppliedMutation(record);
+        return record;
+      }
+
       if (promotion.proposalType === 'research' || promotion.applyMode === 'proposal-only') {
         const followUp = createTranslatedResearchPromotion(promotion, appliedAt);
         store.appendPromotion(followUp);

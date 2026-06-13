@@ -379,7 +379,16 @@ class RevenantsObserver {
     if (!candidate) return null;
     if (isAutoWorkCandidateCoolingDown(candidate, recentEntries, this.pluginConfig)) return null;
 
-    const promotion = buildAutoWorkPromotion(candidate, trace);
+    const candidatePromotion = buildAutoWorkPromotion(candidate, trace);
+    const candidateTrace = traceForAutoWorkPromotion(candidatePromotion, trace);
+    const prepared = prepareEvolutionProposal({
+      trace: candidateTrace,
+      promotion: candidatePromotion,
+      state: this.store.readState(),
+      pluginConfig: this.pluginConfig,
+    });
+    if (!prepared.queued) return null;
+    const promotion = prepared.promotion;
     if (!this.shouldQueuePromotion(promotion)) return null;
 
     this.store.appendPromotion(promotion);
@@ -820,6 +829,24 @@ function buildAutoWorkPromotion(candidate, trace) {
       clusterCount: candidate.clusterCount,
       clusterWindowMs: candidate.clusterWindowMs,
       linkedRuntimeProposalId: candidate.linkedRuntimeProposalId,
+    },
+  };
+}
+
+function traceForAutoWorkPromotion(promotion, trace) {
+  return {
+    id: `${promotion.id}-pressure`,
+    timestamp: promotion.timestamp,
+    sessionId: trace.sessionId || null,
+    sessionKey: trace.sessionKey || null,
+    signalType: promotion.signalType || 'runtime',
+    source: promotion.source || 'revenants',
+    target: promotion.target || trace.sessionKey || trace.sessionId || 'openclaw-runtime',
+    action: 'auto_work_candidate',
+    result: 'success',
+    impactScore: promotion.impactScore,
+    metadata: {
+      ...(promotion.evidence?.metadata || {}),
     },
   };
 }

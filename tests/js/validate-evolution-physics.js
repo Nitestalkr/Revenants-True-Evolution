@@ -87,11 +87,57 @@ async function main() {
   queue = constrainedObserver.reviewQueue('peek', { limit: 10 });
   assert.strictEqual(queue.queuedCount, 1, 'policy-shaped pressure should still surface');
   const conserved = queue.recent.at(-1);
-  assert.strictEqual(conserved.proposalType, 'implementation');
-  assert.strictEqual(conserved.mutationTarget, 'implementation-task');
-  assert.strictEqual(conserved.applyMode, 'task');
-  assert.ok(conserved.validationRequired.includes('bounded-scope'));
+  assert.strictEqual(conserved.proposalType, 'policy');
+  assert.strictEqual(conserved.mutationTarget, 'AGENTS.md');
+  assert.strictEqual(conserved.applyMode, 'blocked');
+  assert.ok(conserved.validationRequired.includes('conservation-law'));
   assert.ok(conserved.physics?.conservation?.violations?.length > 0, 'conservation law should record reroute reason');
+
+  const review = constrainedObserver.reviewQueue('approve', {
+    ids: [conserved.id],
+    reviewer: 'tester',
+  });
+  assert.strictEqual(review.appliedMutations.at(-1).status, 'blocked');
+  assert.strictEqual(
+    constrainedObserver.store.readImplementationTasks(10).length,
+    0,
+    'blocked conservation proposal must not become implementation work',
+  );
+
+  const autoWorkRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'revenants-autowork-conservation-'));
+  const autoWorkObserver = createRevenantsObserver({
+    rootDir: path.join(autoWorkRoot, 'state'),
+    pluginConfig: {
+      dataDir: path.join(autoWorkRoot, 'state'),
+      queueMemoryProposals: true,
+      autoWorkEnabled: true,
+      autoWorkMinIdleMs: 0,
+      conservation: {
+        allowedMutationTargets: ['runtime-config'],
+      },
+    },
+  });
+
+  await autoWorkObserver.start({});
+  autoWorkObserver.store.appendImplementationTask({
+    proposalId: 'manual-task-1',
+    createdAt: new Date().toISOString(),
+    summary: 'Existing implementation backlog should be considered for auto-work.',
+    mutationTarget: 'implementation-task',
+  });
+  autoWorkObserver.recordHook('session_end', {
+    sessionKey: 'agent:main:discord:channel:1473342935373447372',
+    sessionId: 'session-auto-1',
+    status: 'success',
+  }, {});
+
+  queue = autoWorkObserver.reviewQueue('peek', { limit: 10 });
+  const autoWork = queue.recent.find((entry) => String(entry.intent || '').startsWith('auto-work:'));
+  assert.ok(autoWork, 'auto-work pressure should still queue for manual review');
+  assert.strictEqual(autoWork.applyMode, 'blocked');
+  assert.strictEqual(autoWork.mutationTarget, 'implementation-task');
+  assert.ok(autoWork.physics?.pressure?.passed, 'auto-work should include pressure metadata');
+  assert.ok(autoWork.physics?.conservation?.violations?.length > 0, 'auto-work should pass through conservation law');
 
   console.log('evolution physics validation passed');
 }
