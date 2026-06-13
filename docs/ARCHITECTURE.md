@@ -34,7 +34,7 @@ signals. Cron-era materials are provenance and comparison evidence only.
 **How:** Plugin queues or applies distilled signals after pressure and
 conservation checks
 **Benefit:** Deterministic evidence flow with autonomous application bounded by
-explicit conservation rules
+explicit target allow-lists and conservation rules
 
 ## Architecture Diagram
 
@@ -82,10 +82,10 @@ Replaces: Stability Monitor, Boredom Scan, ArXiv Monitor, Cron Health Monitor
 Replaces: GNW Phase 6 sync crons, cluster weight sync, automatic proposal
 delivery
 - Queues advisory drive pressure and promotion candidates
-- Applies pressure/conservation-passed candidates automatically when
-  `autonomousApprovals` is enabled
-- Leaves conservation-blocked candidates queued for inspection instead of
-  applying across boundaries
+- Applies pressure/conservation-passed runtime/config, implementation-task, or
+  research-review candidates automatically when `autonomousApprovals` is enabled
+- Leaves conservation-blocked candidates and sensitive document targets queued
+  for inspection instead of applying across boundaries
 - LibraVDB remains the memory/context authority
 - Deterministic evidence flow, no model dependency for raw collection
 
@@ -150,8 +150,8 @@ implementation task, or supporting guidance.
 - **No model crashes** from cron competition
 - **Output parity** with current cron-derived theory (or better)
 - **Token reduction** ≥ 60% on routine work
-- **No autonomous memory/policy mutation** outside pressure, conservation, and
-  LibraVDB boundaries
+- **No autonomous memory/policy mutation** unless separately opted into the
+  autonomous approval target allow-list
 
 ---
 

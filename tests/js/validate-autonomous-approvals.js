@@ -10,7 +10,7 @@ async function main() {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'revenants-autonomous-'));
   const mutationRoot = path.join(tempRoot, 'workspace');
   fs.mkdirSync(mutationRoot, { recursive: true });
-  fs.writeFileSync(path.join(mutationRoot, 'TOOLS.md'), '# Tools\n');
+  fs.writeFileSync(path.join(mutationRoot, 'AGENTS.md'), '# Agent Notes\n');
 
   const observer = createRevenantsObserver({
     rootDir: path.join(tempRoot, 'state'),
@@ -25,31 +25,55 @@ async function main() {
   await observer.start({});
 
   observer.recordHook('after_tool_call', {
-    sessionId: 'tooling-1',
+    sessionId: 'runtime-1',
     sessionKey: 'agent:main:discord:channel:1473342935373447372',
-    toolName: 'web_fetch',
+    toolName: 'exec',
     status: 'failed',
-    error: 'blocked private address',
+    error: 'timeout contacting upstream',
   }, {});
   observer.recordHook('after_tool_call', {
-    sessionId: 'tooling-2',
+    sessionId: 'runtime-2',
     sessionKey: 'agent:main:discord:channel:1473342935373447372',
-    toolName: 'web_fetch',
+    toolName: 'exec',
     status: 'failed',
-    error: 'blocked private address',
+    error: 'timeout contacting upstream',
   }, {});
 
   let queue = observer.reviewQueue('peek', { limit: 10 });
-  assert.strictEqual(queue.queuedCount, 0, 'autonomous approval should remove eligible tooling proposal from queue');
+  assert.strictEqual(queue.queuedCount, 0, 'autonomous approval should remove eligible runtime proposal from queue');
 
   const reviewed = observer.store.readReviewedPromotions(10);
-  const autonomousTooling = reviewed.find((entry) => entry?.reviewMeta?.reviewer === 'revenants-autonomy');
-  assert.ok(autonomousTooling, 'autonomous approval should be recorded as a review');
-  assert.strictEqual(autonomousTooling.autoApplyEligible, true);
-  assert.ok(!autonomousTooling.validationRequired.includes('human-review'), 'autonomous proposal should not require human review');
+  const autonomousRuntime = reviewed.find((entry) => entry?.reviewMeta?.reviewer === 'revenants-autonomy');
+  assert.ok(autonomousRuntime, 'autonomous approval should be recorded as a review');
+  assert.strictEqual(autonomousRuntime.mutationTarget, 'runtime-config');
+  assert.strictEqual(autonomousRuntime.autoApplyEligible, true);
+  assert.ok(!autonomousRuntime.validationRequired.includes('human-review'), 'autonomous runtime proposal should not require human review');
 
-  const toolsBody = fs.readFileSync(path.join(mutationRoot, 'TOOLS.md'), 'utf8');
-  assert.ok(toolsBody.includes(autonomousTooling.id), 'autonomously approved tooling proposal should apply');
+  const runtimeConfig = observer.store.readRuntimeConfig();
+  assert.strictEqual(
+    runtimeConfig.appliedProposals[autonomousRuntime.id].target,
+    'runtime-config',
+    'autonomously approved runtime proposal should apply',
+  );
+
+  observer.recordHook('after_tool_call', {
+    sessionId: 'policy-1',
+    sessionKey: 'agent:main:discord:channel:1473342935373447372',
+    toolName: 'exec',
+    status: 'failed',
+    error: 'blocked private address',
+  }, {});
+
+  queue = observer.reviewQueue('peek', { limit: 10 });
+  assert.strictEqual(queue.queuedCount, 1, 'sensitive policy proposal should stay queued under autonomy');
+  const policyProposal = queue.recent.at(-1);
+  assert.strictEqual(policyProposal.mutationTarget, 'AGENTS.md');
+  assert.strictEqual(policyProposal.autoApplyEligible, false);
+  assert.ok(policyProposal.validationRequired.includes('human-review'));
+  assert.ok(policyProposal.validationRequired.includes('conservation-law'));
+
+  const agentsBody = fs.readFileSync(path.join(mutationRoot, 'AGENTS.md'), 'utf8');
+  assert.ok(!agentsBody.includes(policyProposal.id), 'autonomy must not mutate AGENTS.md by default');
 
   observer.recordHook('monitor_alert', {
     type: 'arxiv_paper',
@@ -63,7 +87,7 @@ async function main() {
   }, {});
 
   queue = observer.reviewQueue('peek', { limit: 10 });
-  assert.strictEqual(queue.queuedCount, 0, 'autonomous research translation follow-up should also apply');
+  assert.strictEqual(queue.queuedCount, 1, 'policy proposal should remain queued while autonomous research follow-up applies');
   const applied = observer.store.readAppliedMutations(20);
   assert.ok(
     applied.some((entry) => entry.status === 'translated' && entry.translatedProposalId),

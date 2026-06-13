@@ -57,7 +57,14 @@
       },
       "autonomousApprovals": {
         "type": "boolean",
-        "description": "When true, pressure/conservation-passed proposals are approved and applied automatically; conservation-blocked proposals stay queued."
+        "description": "When true, pressure/conservation-passed proposals for autonomousApprovalTargets are approved and applied automatically; sensitive docs stay queued by default."
+      },
+      "autonomousApprovalTargets": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Explicit mutation targets eligible for autonomous approval. Defaults to runtime-config, implementation-task, and research-review."
       },
       "proposalNotifyTimeoutMs": {
         "type": "integer",

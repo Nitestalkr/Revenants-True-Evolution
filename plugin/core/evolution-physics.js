@@ -10,6 +10,18 @@ const DEFAULT_ALLOWED_MUTATION_TARGETS = new Set([
   'research-review',
 ]);
 
+const DEFAULT_AUTONOMOUS_APPROVAL_TARGETS = new Set([
+  'runtime-config',
+  'implementation-task',
+  'research-review',
+]);
+
+const SENSITIVE_MUTATION_TARGETS = new Set([
+  'AGENTS.md',
+  'SOUL.md',
+  'MEMORY.md',
+]);
+
 function evaluatePressure({ trace, promotion, state, pluginConfig } = {}) {
   const impact = clamp01(Number(promotion?.impactScore ?? trace?.impactScore ?? 0));
   const failurePressure = trace?.result === 'failure' || trace?.result === 'partial'
@@ -36,11 +48,12 @@ function evaluatePressure({ trace, promotion, state, pluginConfig } = {}) {
 function applyConservationLaw(promotion, { pluginConfig } = {}) {
   const allowedTargets = resolveAllowedTargets(pluginConfig);
   const autonomousApprovals = isAutonomousApprovalsEnabled(pluginConfig);
+  const autonomousTargetAllowed = isAutonomousApprovalTargetAllowed(promotion, pluginConfig);
   const next = {
     ...promotion,
     validationRequired: filterHumanReview(
       uniqueStrings(promotion?.validationRequired || []),
-      autonomousApprovals,
+      autonomousApprovals && autonomousTargetAllowed,
     ),
     autoApplyEligible: promotion?.autoApplyEligible === true,
   };
@@ -72,15 +85,30 @@ function applyConservationLaw(promotion, { pluginConfig } = {}) {
     next.proposalType === 'policy'
     || next.mutationTarget === 'AGENTS.md'
     || next.mutationTarget === 'SOUL.md'
+    || next.mutationTarget === 'MEMORY.md'
   ) {
+    if (!autonomousTargetAllowed) {
+      next.autoApplyEligible = false;
+      next.validationRequired = uniqueStrings([
+        ...next.validationRequired,
+        'human-review',
+      ]);
+    }
     next.validationRequired = uniqueStrings([
       ...next.validationRequired,
       'conservation-law',
     ]);
   }
 
-  if (autonomousApprovals && violations.length === 0 && next.applyMode !== 'blocked') {
+  if (
+    autonomousApprovals
+    && autonomousTargetAllowed
+    && violations.length === 0
+    && next.applyMode !== 'blocked'
+  ) {
     next.autoApplyEligible = true;
+  } else if (autonomousApprovals && !autonomousTargetAllowed) {
+    next.autoApplyEligible = false;
   }
 
   return {
@@ -165,6 +193,17 @@ function isAutonomousApprovalsEnabled(pluginConfig = {}) {
     || pluginConfig?.evolution?.autonomousApprovals === true;
 }
 
+function isAutonomousApprovalTargetAllowed(promotion, pluginConfig = {}) {
+  const configured = pluginConfig?.autonomousApprovalTargets
+    || pluginConfig?.evolution?.autonomousApprovalTargets;
+  const allowedTargets = Array.isArray(configured) && configured.length > 0
+    ? new Set(configured.map((target) => String(target)))
+    : DEFAULT_AUTONOMOUS_APPROVAL_TARGETS;
+  const target = String(promotion?.mutationTarget || '');
+  if (SENSITIVE_MUTATION_TARGETS.has(target) && !allowedTargets.has(target)) return false;
+  return allowedTargets.has(target);
+}
+
 function filterHumanReview(values, autonomousApprovals) {
   if (!autonomousApprovals) return values;
   return values.filter((value) => value !== 'human-review');
@@ -198,4 +237,5 @@ module.exports = {
   applyConservationLaw,
   prepareEvolutionProposal,
   isAutonomousApprovalsEnabled,
+  isAutonomousApprovalTargetAllowed,
 };

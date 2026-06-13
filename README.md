@@ -20,9 +20,11 @@ Revenants now treats research ingestion as a separate optional lane:
   papers that can become reviewable proposals
 
 Both lanes feed the same physics-gated proposal path. When
-`autonomousApprovals` is enabled, proposals that pass pressure and conservation
-checks can apply without a human approval command; conservation-blocked
-proposals remain queued.
+`autonomousApprovals` is enabled, only proposals whose mutation target is in the
+separate autonomous allow-list can apply without a human approval command. The
+default autonomous targets are `runtime-config`, `implementation-task`, and
+`research-review`; policy, persona, and memory documents remain queued unless
+explicitly opted in.
 
 Research-derived proposals can now carry explicit landing metadata for the
 current paper families under discussion:
@@ -76,4 +78,4 @@ The plugin currently exposes two OpenClaw-facing tools:
   queued promotions
 - `revenants_review_queue` for inspecting queue pressure and manually
   reviewing promotion signals when autonomous approval is disabled or a
-  conservation boundary blocks application
+  target is outside the autonomous approval boundary
