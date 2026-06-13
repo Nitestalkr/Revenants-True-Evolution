@@ -107,6 +107,53 @@ function main() {
   assert.strictEqual(researchPromotion.researchAssessment.deliberationProfile.mode, 'translation-first');
   assert.strictEqual(researchPromotion.researchAssessment.expectedImpact, 'high');
 
+  const genericResearchPromotion = buildPromotion({
+    id: 'trace-generic-research',
+    timestamp: new Date().toISOString(),
+    signalType: 'research',
+    source: 'openclaw-hook',
+    action: 'monitor_alert',
+    result: 'success',
+    impactScore: 0.82,
+    metadata: {
+      alertType: 'arxiv_paper',
+      paper: {
+        id: 'http://arxiv.org/abs/2506.33333',
+        title: 'A Framework for Broadcast Gating in Agent Systems',
+        summary: 'This benchmark studies framework behavior, broadcast reliability, and gating under generic orchestration workloads.',
+        published: '2026-06-01T00:00:00Z',
+        authors: ['B. Researcher'],
+      },
+    },
+  });
+
+  assert.deepStrictEqual(genericResearchPromotion.researchAssessment.frameworks, []);
+  assert.strictEqual(genericResearchPromotion.researchAssessment.primaryFramework, null);
+  assert.strictEqual(genericResearchPromotion.researchAssessment.suggestedMutationTarget, 'implementation-task');
+
+  const safetyResearchPromotion = buildPromotion({
+    id: 'trace-safety-research',
+    timestamp: new Date().toISOString(),
+    signalType: 'research',
+    source: 'openclaw-hook',
+    action: 'monitor_alert',
+    result: 'success',
+    impactScore: 0.82,
+    metadata: {
+      alertType: 'arxiv_paper',
+      paper: {
+        id: 'http://arxiv.org/abs/2506.44444',
+        title: 'LDT: Layered Deliberation Thresholds for Safety Governance',
+        summary: 'We describe staged review, confidence gates, alignment policy, and governance controls for deliberative agent escalation.',
+        published: '2026-06-01T00:00:00Z',
+        authors: ['C. Researcher'],
+      },
+    },
+  });
+
+  assert.deepStrictEqual(safetyResearchPromotion.researchAssessment.frameworks, ['LDT']);
+  assert.strictEqual(safetyResearchPromotion.researchAssessment.suggestedMutationTarget, 'AGENTS.md');
+
   console.log('proposal routing validation passed');
 }
 

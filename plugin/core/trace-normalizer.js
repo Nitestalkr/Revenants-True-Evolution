@@ -6,16 +6,17 @@ const RESEARCH_FRAMEWORKS = [
   {
     id: 'GRAM',
     name: 'Gradient Routing and Attentional Modulation',
-    keywords: [
-      'gram',
+    acronym: 'GRAM',
+    companionKeywords: [
       'gradient routing',
       'attentional modulation',
       'global workspace',
       'global neuronal workspace',
-      'broadcast',
       'salience routing',
       'workspace coordination',
+      'salience broadcast',
     ],
+    weakKeywords: ['broadcast'],
     landingZones: [
       'plugin/core/observer.js',
       'plugin/core/trace-normalizer.js',
@@ -27,16 +28,16 @@ const RESEARCH_FRAMEWORKS = [
   {
     id: 'LDT',
     name: 'Layered Deliberation Thresholds',
-    keywords: [
-      'ldt',
+    acronym: 'LDT',
+    companionKeywords: [
       'layered deliberation',
       'decision threshold',
       'confidence gate',
-      'gating',
       'deliberation threshold',
       'escalation threshold',
       'staged review',
     ],
+    weakKeywords: ['gating'],
     landingZones: [
       'plugin/core/observer.js',
       'plugin/core/data-store.js',
@@ -49,8 +50,8 @@ const RESEARCH_FRAMEWORKS = [
   {
     id: 'PTRM',
     name: 'Paper-to-Runtime Translation Model',
-    keywords: [
-      'ptrm',
+    acronym: 'PTRM',
+    companionKeywords: [
       'paper-to-runtime',
       'research translation',
       'translation model',
@@ -443,8 +444,12 @@ function buildResearchAssessment(trace) {
 function identifyResearchFrameworks(text) {
   const matches = [];
   for (const framework of RESEARCH_FRAMEWORKS) {
-    const hitCount = scoreKeywordHits(text, framework.keywords);
-    if (hitCount === 0) continue;
+    const acronymHit = hasExactToken(text, framework.acronym);
+    const companionHits = scoreKeywordHits(text, framework.companionKeywords || []);
+    const weakHits = scoreKeywordHits(text, framework.weakKeywords || []);
+    const qualifies = companionHits >= 2 || (acronymHit && companionHits >= 1);
+    if (!qualifies) continue;
+    const hitCount = companionHits + weakHits + (acronymHit ? 1 : 0);
     matches.push({
       ...framework,
       hitCount,
@@ -488,7 +493,7 @@ function buildResearchRationale(frameworkMatches, text) {
     return 'Generic research-origin signal; hold in review until a human selects the downstream mutation target.';
   }
   const notes = frameworkMatches.map((framework) => framework.rationale);
-  if (/safety|alignment|policy|governance/.test(text)) {
+  if (hasSafetyGovernanceLanguage(text)) {
     notes.push('The paper also carries governance or safety language, so it should stay on the explicit review path.');
   }
   return notes.join(' ');
@@ -496,11 +501,11 @@ function buildResearchRationale(frameworkMatches, text) {
 
 function pickResearchTarget(text, implementationScore, cognitiveScore, frameworkMatches = []) {
   const frameworkIds = frameworkMatches.map((framework) => framework.id);
+  if (hasSafetyGovernanceLanguage(text)) return 'AGENTS.md';
   if (frameworkIds.includes('LDT')) return 'runtime-config';
   if (frameworkIds.includes('GRAM')) return 'implementation-task';
   if (frameworkIds.includes('PTRM')) return 'implementation-task';
   if (implementationScore >= 2 || cognitiveScore >= 3) return 'implementation-task';
-  if (/policy|safety|governance|alignment|constitutional/.test(text)) return 'AGENTS.md';
   if (/prompt|instruction|reasoning strategy|reflection/.test(text)) return 'AGENTS.md';
   if (/tool use|tools|instrumentation|workflow|orchestration/.test(text)) return 'TOOLS.md';
   if (/persona|personality|style|identity/.test(text)) return 'SOUL.md';
@@ -520,6 +525,20 @@ function scoreKeywordHits(text, keywords) {
     if (text.includes(keyword)) score += 1;
   }
   return score;
+}
+
+function hasExactToken(text, token) {
+  if (!token) return false;
+  const pattern = new RegExp(`\\b${escapeRegExp(String(token).toLowerCase())}\\b`);
+  return pattern.test(text);
+}
+
+function hasSafetyGovernanceLanguage(text) {
+  return /\b(safety|governance|alignment|constitutional)\b/.test(text);
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function clamp01(value) {
@@ -554,6 +573,7 @@ module.exports = {
   normalizeTurnTrace,
   normalizeHookTrace,
   buildPromotion,
+  identifyResearchFrameworks,
   collectToolStats,
   routePromotion,
 };

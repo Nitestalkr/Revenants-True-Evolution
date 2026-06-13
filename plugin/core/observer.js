@@ -3,9 +3,10 @@
 const path = require('path');
 const DataStore = require('./data-store');
 const MonitorSuite = require('../monitors/monitor-suite');
-const { normalizeHookTrace, buildPromotion } = require('./trace-normalizer');
+const { normalizeHookTrace, buildPromotion, identifyResearchFrameworks } = require('./trace-normalizer');
 const { resolveRuntimeRoot } = require('./storage-paths');
 const { createPromotionApplier, classifyRuntimeHandling } = require('./promotion-applier');
+const { prepareEvolutionProposal } = require('./evolution-physics');
 
 const DEFAULT_HOOKS = [
   'gateway_start',
@@ -166,8 +167,14 @@ class RevenantsObserver {
 
     if (this.shouldPromote(trace)) {
       const candidate = buildPromotion(trace);
-      if (this.shouldQueuePromotion(candidate)) {
-        promotion = candidate;
+      const prepared = prepareEvolutionProposal({
+        trace,
+        promotion: candidate,
+        state: this.store.readState(),
+        pluginConfig: this.pluginConfig,
+      });
+      if (prepared.queued && this.shouldQueuePromotion(prepared.promotion)) {
+        promotion = prepared.promotion;
         this.store.appendPromotion(promotion);
       }
     }
@@ -447,6 +454,10 @@ function redactPromotion(promotion) {
     applyMode: promotion.applyMode,
     validationRequired: Array.isArray(promotion.validationRequired) ? promotion.validationRequired : [],
     autoApplyEligible: promotion.autoApplyEligible === true,
+    physics: promotion.physics ? {
+      pressure: promotion.physics.pressure,
+      conservation: promotion.physics.conservation,
+    } : undefined,
     mutationPlan: promotion.mutationPlan ? {
       rationale: promotion.mutationPlan.rationale,
       summary: promotion.mutationPlan.summary,
@@ -1010,11 +1021,8 @@ function extractResearchFrameworkIds(trace, promotion) {
   if (Array.isArray(trace?.metadata?.paperFrameworks) && trace.metadata.paperFrameworks.length > 0) {
     return trace.metadata.paperFrameworks;
   }
-  const paperText = `${trace?.metadata?.paper?.title || ''} ${trace?.metadata?.paper?.summary || ''}`.toUpperCase();
-  const inferred = [];
-  for (const frameworkId of ['GRAM', 'LDT', 'PTRM']) {
-    if (paperText.includes(frameworkId)) inferred.push(frameworkId);
-  }
+  const paperText = `${trace?.metadata?.paper?.title || ''} ${trace?.metadata?.paper?.summary || ''}`.toLowerCase();
+  const inferred = identifyResearchFrameworks(paperText).map((framework) => framework.id);
   if (inferred.length > 0) return inferred;
   return [];
 }
