@@ -3,9 +3,10 @@
 const path = require('path');
 const DataStore = require('./data-store');
 const MonitorSuite = require('../monitors/monitor-suite');
-const { normalizeHookTrace, buildPromotion } = require('./trace-normalizer');
+const { normalizeHookTrace, buildPromotion, identifyResearchFrameworks } = require('./trace-normalizer');
 const { resolveRuntimeRoot } = require('./storage-paths');
 const { createPromotionApplier, classifyRuntimeHandling } = require('./promotion-applier');
+const { prepareEvolutionProposal } = require('./evolution-physics');
 
 const DEFAULT_HOOKS = [
   'gateway_start',
@@ -51,6 +52,12 @@ class RevenantsObserver {
     this.promotionApplier = ctx.promotionApplier || createPromotionApplier({
       store: this.store,
       mutationRoot: this.mutationRoot,
+      preparePromotion: (promotion, trace) => prepareEvolutionProposal({
+        trace,
+        promotion,
+        state: this.store.readState(),
+        pluginConfig: this.pluginConfig,
+      }),
       notifyQueuedPromotion: (promotion, trace) => this.notifyQueuedPromotion(promotion, trace),
       readNotificationSessionKey: (promotionId) => this.store.readState()?.notifications?.sentPromotions?.[promotionId]?.sessionKey || null,
     });
@@ -166,8 +173,14 @@ class RevenantsObserver {
 
     if (this.shouldPromote(trace)) {
       const candidate = buildPromotion(trace);
-      if (this.shouldQueuePromotion(candidate)) {
-        promotion = candidate;
+      const prepared = prepareEvolutionProposal({
+        trace,
+        promotion: candidate,
+        state: this.store.readState(),
+        pluginConfig: this.pluginConfig,
+      });
+      if (prepared.queued && this.shouldQueuePromotion(prepared.promotion)) {
+        promotion = prepared.promotion;
         this.store.appendPromotion(promotion);
       }
     }
@@ -372,7 +385,16 @@ class RevenantsObserver {
     if (!candidate) return null;
     if (isAutoWorkCandidateCoolingDown(candidate, recentEntries, this.pluginConfig)) return null;
 
-    const promotion = buildAutoWorkPromotion(candidate, trace);
+    const candidatePromotion = buildAutoWorkPromotion(candidate, trace);
+    const candidateTrace = traceForAutoWorkPromotion(candidatePromotion, trace);
+    const prepared = prepareEvolutionProposal({
+      trace: candidateTrace,
+      promotion: candidatePromotion,
+      state: this.store.readState(),
+      pluginConfig: this.pluginConfig,
+    });
+    if (!prepared.queued) return null;
+    const promotion = prepared.promotion;
     if (!this.shouldQueuePromotion(promotion)) return null;
 
     this.store.appendPromotion(promotion);
@@ -447,16 +469,26 @@ function redactPromotion(promotion) {
     applyMode: promotion.applyMode,
     validationRequired: Array.isArray(promotion.validationRequired) ? promotion.validationRequired : [],
     autoApplyEligible: promotion.autoApplyEligible === true,
+    physics: promotion.physics ? {
+      pressure: promotion.physics.pressure,
+      conservation: promotion.physics.conservation,
+    } : undefined,
     mutationPlan: promotion.mutationPlan ? {
       rationale: promotion.mutationPlan.rationale,
       summary: promotion.mutationPlan.summary,
     } : undefined,
     researchAssessment: promotion.researchAssessment ? {
       sourcePaper: promotion.researchAssessment.sourcePaper,
+      frameworks: promotion.researchAssessment.frameworks,
+      primaryFramework: promotion.researchAssessment.primaryFramework,
+      landingZones: promotion.researchAssessment.landingZones,
+      gradientTargets: promotion.researchAssessment.gradientTargets,
+      deliberationProfile: promotion.researchAssessment.deliberationProfile,
       confidence: promotion.researchAssessment.confidence,
       novelty: promotion.researchAssessment.novelty,
       expectedImpact: promotion.researchAssessment.expectedImpact,
       suggestedMutationTarget: promotion.researchAssessment.suggestedMutationTarget,
+      rationale: promotion.researchAssessment.rationale,
     } : undefined,
     impactScore: promotion.impactScore,
     summary: promotion.summary,
@@ -590,6 +622,10 @@ function updateDriveScores(state, trace) {
   }
   if (trace.signalType === 'user_interaction') scores.helpfulness = clamp(scores.helpfulness + 0.03);
   if (trace.signalType === 'tooling') scores.goal_directed = clamp(scores.goal_directed + 0.02);
+  const frameworkIds = extractResearchFrameworkIds(trace);
+  if (frameworkIds.includes('GRAM')) scores.curiosity = clamp(scores.curiosity + 0.04);
+  if (frameworkIds.includes('LDT')) scores.safety = clamp(scores.safety + 0.03);
+  if (frameworkIds.includes('PTRM')) scores.goal_directed = clamp(scores.goal_directed + 0.03);
 }
 
 function updateGraoSignals(state, trace, promotion) {
@@ -597,6 +633,19 @@ function updateGraoSignals(state, trace, promotion) {
   if (trace.result === 'failure' && trace.signalType === 'tooling') gradients.add('tool-call-reliability');
   if (trace.signalType === 'memory') gradients.add('context-integrity');
   if (trace.signalType === 'runtime') gradients.add('runtime-stability');
+  const frameworkIds = extractResearchFrameworkIds(trace, promotion);
+  if (frameworkIds.includes('GRAM')) {
+    gradients.add('salience-broadcast');
+    gradients.add('proposal-routing');
+  }
+  if (frameworkIds.includes('LDT')) {
+    gradients.add('deliberation-thresholding');
+    gradients.add('review-gating');
+  }
+  if (frameworkIds.includes('PTRM')) {
+    gradients.add('research-translation');
+    gradients.add('evidence-traceability');
+  }
   state.grao.activeGradients = [...gradients].slice(-10);
   if (trace.result === 'failure') state.grao.knownFailureCount += 1;
   if (promotion) {
@@ -790,6 +839,24 @@ function buildAutoWorkPromotion(candidate, trace) {
   };
 }
 
+function traceForAutoWorkPromotion(promotion, trace) {
+  return {
+    id: `${promotion.id}-pressure`,
+    timestamp: promotion.timestamp,
+    sessionId: trace.sessionId || null,
+    sessionKey: trace.sessionKey || null,
+    signalType: promotion.signalType || 'runtime',
+    source: promotion.source || 'revenants',
+    target: promotion.target || trace.sessionKey || trace.sessionId || 'openclaw-runtime',
+    action: 'auto_work_candidate',
+    result: 'success',
+    impactScore: promotion.impactScore,
+    metadata: {
+      ...(promotion.evidence?.metadata || {}),
+    },
+  };
+}
+
 function describeFailureCluster(trace, store, pluginConfig) {
   if (trace?.signalType !== 'tooling' || trace?.result !== 'failure') return null;
   const toolName = String(trace?.metadata?.toolName || '');
@@ -942,10 +1009,16 @@ function formatProposalNotification(promotion, trace, route) {
   if (promotion.mutationPlan?.summary) lines.push(`Apply path: ${promotion.mutationPlan.summary}`);
   if (promotion.researchAssessment?.sourcePaper?.title) lines.push(`Source paper: ${promotion.researchAssessment.sourcePaper.title}`);
   if (promotion.researchAssessment) {
+    if (Array.isArray(promotion.researchAssessment.frameworks) && promotion.researchAssessment.frameworks.length > 0) {
+      lines.push(`Frameworks: ${promotion.researchAssessment.frameworks.join(', ')}`);
+    }
     lines.push(`Research confidence: ${Number(promotion.researchAssessment.confidence || 0).toFixed(2)}`);
     lines.push(`Research novelty: ${Number(promotion.researchAssessment.novelty || 0).toFixed(2)}`);
     lines.push(`Expected impact: ${promotion.researchAssessment.expectedImpact}`);
     lines.push(`Suggested target: ${promotion.researchAssessment.suggestedMutationTarget}`);
+    if (Array.isArray(promotion.researchAssessment.landingZones) && promotion.researchAssessment.landingZones.length > 0) {
+      lines.push(`Landing zones: ${promotion.researchAssessment.landingZones.join(', ')}`);
+    }
   }
   if (trace?.metadata?.toolName) lines.push(`Tool: ${trace.metadata.toolName}`);
   const clusterCount = Number(promotion?.evidence?.metadata?.clusterCount || 0);
@@ -971,6 +1044,20 @@ function impactToRiskLabel(score) {
   if (value >= 0.8) return 'high';
   if (value >= 0.5) return 'medium';
   return 'low';
+}
+
+function extractResearchFrameworkIds(trace, promotion) {
+  const researchAssessment = promotion?.researchAssessment || trace?.researchAssessment || null;
+  if (Array.isArray(researchAssessment?.frameworks) && researchAssessment.frameworks.length > 0) {
+    return researchAssessment.frameworks;
+  }
+  if (Array.isArray(trace?.metadata?.paperFrameworks) && trace.metadata.paperFrameworks.length > 0) {
+    return trace.metadata.paperFrameworks;
+  }
+  const paperText = `${trace?.metadata?.paper?.title || ''} ${trace?.metadata?.paper?.summary || ''}`.toLowerCase();
+  const inferred = identifyResearchFrameworks(paperText).map((framework) => framework.id);
+  if (inferred.length > 0) return inferred;
+  return [];
 }
 
 function resolveMutationRoot(rootDir, pluginConfig) {

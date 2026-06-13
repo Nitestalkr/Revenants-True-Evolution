@@ -7,6 +7,7 @@ function createPromotionApplier(ctx = {}) {
   const {
     store,
     mutationRoot,
+    preparePromotion,
     notifyQueuedPromotion,
     readNotificationSessionKey,
   } = ctx;
@@ -29,23 +30,37 @@ function createPromotionApplier(ctx = {}) {
         details: null,
       };
 
+      if (promotion.applyMode === 'blocked' || promotion?.physics?.conservation?.passed === false) {
+        const violations = promotion?.physics?.conservation?.violations || [];
+        const record = {
+          ...baseRecord,
+          status: 'blocked',
+          details: violations.length > 0
+            ? `Conservation law blocked mutation: ${violations.map((violation) => `${violation.kind}:${violation.value}`).join(', ')}.`
+            : 'Conservation law blocked mutation.',
+        };
+        store.appendAppliedMutation(record);
+        return record;
+      }
+
       if (promotion.proposalType === 'research' || promotion.applyMode === 'proposal-only') {
-        const followUp = createTranslatedResearchPromotion(promotion, appliedAt);
+        const candidateFollowUp = createTranslatedResearchPromotion(promotion, appliedAt);
+        const translationTrace = createResearchTranslationTrace(candidateFollowUp, promotion, appliedAt);
+        const prepared = typeof preparePromotion === 'function'
+          ? preparePromotion(candidateFollowUp, translationTrace)
+          : { queued: true, promotion: candidateFollowUp };
+        if (!prepared.queued) {
+          const record = {
+            ...baseRecord,
+            status: 'blocked',
+            details: `Research translation follow-up did not meet evolution pressure threshold (${prepared.reason || 'not queued'}).`,
+          };
+          store.appendAppliedMutation(record);
+          return record;
+        }
+        const followUp = prepared.promotion;
         store.appendPromotion(followUp);
-        store.appendTrace({
-          id: `${followUp.id}-trace`,
-          timestamp: appliedAt,
-          signalType: 'research',
-          source: 'revenants',
-          target: followUp.mutationTarget,
-          action: 'research_translation',
-          result: 'success',
-          impactScore: followUp.impactScore,
-          metadata: {
-            sourceProposalId: promotion.id,
-            suggestedMutationTarget: promotion?.researchAssessment?.suggestedMutationTarget || null,
-          },
-        });
+        store.appendTrace(translationTrace);
         if (typeof notifyQueuedPromotion === 'function') {
           void notifyQueuedPromotion(followUp, {
             sessionKey: typeof readNotificationSessionKey === 'function'
@@ -124,6 +139,23 @@ function createPromotionApplier(ctx = {}) {
   };
 }
 
+function createResearchTranslationTrace(followUp, sourcePromotion, timestamp) {
+  return {
+    id: `${followUp.id}-trace`,
+    timestamp,
+    signalType: 'research',
+    source: 'revenants',
+    target: followUp.mutationTarget,
+    action: 'research_translation',
+    result: 'success',
+    impactScore: followUp.impactScore,
+    metadata: {
+      sourceProposalId: sourcePromotion.id,
+      suggestedMutationTarget: sourcePromotion?.researchAssessment?.suggestedMutationTarget || null,
+    },
+  };
+}
+
 function resolveMutationTargetPath(rootDir, mutationTarget) {
   return path.join(rootDir, mutationTarget);
 }
@@ -144,13 +176,20 @@ function renderMutationEntry(promotion, appliedAt) {
     '',
     `## Mutation ${promotion.id}`,
     '',
-    `- Applied: ${appliedAt}`,
-    `- Intent: ${promotion.intent}`,
-    `- Type: ${promotion.proposalType}`,
-    `- Reason: ${promotion.summary}`,
   ];
-  if (promotion.mutationPlan?.summary) lines.push(`- Apply path: ${promotion.mutationPlan.summary}`);
+  const emittedLabels = new Set();
+  pushLabeledLine(lines, emittedLabels, 'Applied', appliedAt);
+  pushLabeledLine(lines, emittedLabels, 'Intent', promotion.intent);
+  pushLabeledLine(lines, emittedLabels, 'Type', promotion.proposalType);
+  pushLabeledLine(lines, emittedLabels, 'Reason', promotion.summary);
+  pushLabeledLine(lines, emittedLabels, 'Apply path', promotion.mutationPlan?.summary);
   return `${lines.join('\n')}\n`;
+}
+
+function pushLabeledLine(lines, emittedLabels, label, value) {
+  if (!value || emittedLabels.has(label)) return;
+  emittedLabels.add(label);
+  lines.push(`- ${label}: ${value}`);
 }
 
 function classifyRuntimeHandling(errorText, opts = {}) {
@@ -168,6 +207,10 @@ function createTranslatedResearchPromotion(promotion, appliedAt) {
   const mutationTarget = promotion?.researchAssessment?.suggestedMutationTarget || 'implementation-task';
   const route = routeForMutationTarget(mutationTarget);
   const paperTitle = promotion?.researchAssessment?.sourcePaper?.title || 'research insight';
+  const frameworkSummary = Array.isArray(promotion?.researchAssessment?.frameworks)
+    && promotion.researchAssessment.frameworks.length > 0
+    ? ` (${promotion.researchAssessment.frameworks.join('/')})`
+    : '';
   return {
     id: `${promotion.id}-followup`,
     timestamp: appliedAt,
@@ -177,7 +220,7 @@ function createTranslatedResearchPromotion(promotion, appliedAt) {
     target: 'libravdb-review-queue',
     intent: 'translate-research-insight',
     impactScore: promotion.impactScore,
-    summary: `Translated research insight from ${paperTitle} into a concrete ${route.type} proposal`,
+    summary: `Translated research insight${frameworkSummary} from ${paperTitle} into a concrete ${route.type} proposal`,
     proposalType: route.type,
     mutationTarget: route.target,
     applyMode: route.applyMode,
@@ -193,8 +236,15 @@ function createTranslatedResearchPromotion(promotion, appliedAt) {
       metadata: {
         sourceProposalId: promotion.id,
         sourcePaperTitle: paperTitle,
+        sourceFrameworks: promotion?.researchAssessment?.frameworks || [],
+        landingZones: promotion?.researchAssessment?.landingZones || [],
       },
     },
+    researchAssessment: promotion?.researchAssessment
+      ? {
+          ...promotion.researchAssessment,
+        }
+      : undefined,
     parentProposalId: promotion.id,
   };
 }

@@ -104,6 +104,28 @@ delivery
 - Replace GNW drive cron with advisory drive-pressure summaries
 - Verify outputs match
 
+## Research Landing Map
+
+Recent paper-derived work should extend the existing plugin-native surfaces rather
+than spawn a separate subsystem:
+
+- **GRAM** lands in `plugin/core/observer.js` and
+  `plugin/core/trace-normalizer.js`
+  to sharpen salience scoring, gradient routing, and proposal shaping.
+- **LDT** lands in `plugin/core/observer.js`,
+  `plugin/core/data-store.js`, and `plugin/core/promotion-applier.js`
+  to govern staged review thresholds, queue escalation, and runtime policy
+  follow-up.
+- **PTRM** lands in `plugin/monitors/arxiv-monitor.js`,
+  `plugin/core/trace-normalizer.js`, and
+  `plugin/core/promotion-applier.js`
+  to keep research-to-runtime translation explicit, reviewable, and tied to
+  concrete landing zones.
+
+Research-origin proposals should surface these landing zones in queue metadata so
+agent review can decide whether a paper belongs in runtime config, an
+implementation task, or supporting guidance.
+
 ### Phase 3: Integration
 - Deploy plugin as OpenClaw plugin
 - Remove cron dependency from the target Revenants path

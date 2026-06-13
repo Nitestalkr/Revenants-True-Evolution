@@ -21,11 +21,11 @@ async function main() {
   observer.recordHook('monitor_alert', {
     type: 'arxiv_paper',
     paper: {
-      id: 'http://arxiv.org/abs/2506.12345',
-      title: 'A Global Workspace Agent Architecture for Tool Use',
-      summary: 'We present an agentic cognitive architecture with global workspace coordination, tool use, and evaluation benchmarks.',
-      published: '2026-06-01T00:00:00Z',
-      authors: ['Jane Doe', 'John Smith'],
+      id: 'http://arxiv.org/abs/2506.22345',
+      title: 'LDT: Layered Deliberation Thresholds for Runtime Escalation',
+      summary: 'We describe staged review, confidence gates, runtime escalation thresholds, and bounded follow-up policy for agent proposals.',
+      published: '2026-06-02T00:00:00Z',
+      authors: ['June Roe', 'Max Smith'],
     },
   }, {});
 
@@ -33,6 +33,8 @@ async function main() {
   const researchProposal = before.recent.at(-1);
   assert.ok(researchProposal, 'research proposal should be queued');
   assert.strictEqual(researchProposal.proposalType, 'research');
+  assert.deepStrictEqual(researchProposal.researchAssessment.frameworks, ['LDT']);
+  assert.strictEqual(researchProposal.researchAssessment.suggestedMutationTarget, 'runtime-config');
 
   const approve = observer.reviewQueue('approve', {
     ids: [researchProposal.id],
@@ -45,12 +47,60 @@ async function main() {
   const followUp = after.recent.at(-1);
   assert.ok(followUp, 'translated follow-up proposal should be queued');
   assert.strictEqual(followUp.id, approve.appliedMutations[0].translatedProposalId);
-  assert.strictEqual(followUp.proposalType, 'implementation');
-  assert.strictEqual(followUp.mutationTarget, 'implementation-task');
-  assert.strictEqual(followUp.applyMode, 'task');
+  assert.strictEqual(followUp.proposalType, 'runtime');
+  assert.strictEqual(followUp.mutationTarget, 'runtime-config');
+  assert.strictEqual(followUp.applyMode, 'config-patch');
+  assert.deepStrictEqual(followUp.researchAssessment.frameworks, ['LDT']);
 
   const applied = observer.store.readAppliedMutations(5);
   assert.strictEqual(applied.at(-1).translatedProposalId, followUp.id);
+
+  const constrainedRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'revenants-research-translate-constrained-'));
+  const constrainedObserver = createRevenantsObserver({
+    rootDir: path.join(constrainedRoot, 'state'),
+    pluginConfig: {
+      dataDir: path.join(constrainedRoot, 'state'),
+      queueMemoryProposals: true,
+      conservation: {
+        allowedMutationTargets: ['research-review'],
+      },
+    },
+  });
+
+  await constrainedObserver.start({});
+  constrainedObserver.recordHook('monitor_alert', {
+    type: 'arxiv_paper',
+    paper: {
+      id: 'http://arxiv.org/abs/2506.44556',
+      title: 'LDT: Layered Deliberation Thresholds for Safety Governance',
+      summary: 'We describe staged review, confidence gates, constitutional alignment, policy governance, and conservative escalation controls.',
+      published: '2026-06-03T00:00:00Z',
+      authors: ['Ada Researcher'],
+    },
+  }, {});
+
+  const constrainedResearch = constrainedObserver.reviewQueue('peek', { limit: 5 }).recent.at(-1);
+  assert.ok(constrainedResearch, 'constrained research proposal should be queued');
+  assert.strictEqual(constrainedResearch.mutationTarget, 'research-review');
+  assert.ok(constrainedResearch.physics?.conservation?.passed, 'initial research-review proposal should satisfy conservation');
+
+  const constrainedApprove = constrainedObserver.reviewQueue('approve', {
+    ids: [constrainedResearch.id],
+    reviewer: 'tester',
+  });
+  assert.strictEqual(constrainedApprove.appliedMutations[0]?.status, 'translated');
+
+  const constrainedFollowUp = constrainedObserver.reviewQueue('peek', { limit: 5 }).recent.at(-1);
+  assert.ok(constrainedFollowUp, 'constrained translated follow-up should still surface for review');
+  assert.strictEqual(constrainedFollowUp.id, constrainedApprove.appliedMutations[0].translatedProposalId);
+  assert.strictEqual(constrainedFollowUp.mutationTarget, 'AGENTS.md');
+  assert.strictEqual(constrainedFollowUp.applyMode, 'blocked');
+  assert.ok(constrainedFollowUp.physics?.pressure?.passed, 'translated follow-up should include pressure metadata');
+  assert.strictEqual(constrainedFollowUp.physics?.conservation?.passed, false);
+  assert.ok(
+    constrainedFollowUp.physics?.conservation?.violations?.some((violation) => violation.value === 'AGENTS.md'),
+    'translated follow-up should record the forbidden AGENTS.md target',
+  );
 
   console.log('research translation validation passed');
 }

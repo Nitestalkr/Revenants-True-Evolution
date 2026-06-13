@@ -2,6 +2,75 @@
 
 const crypto = require('crypto');
 
+const RESEARCH_FRAMEWORKS = [
+  {
+    id: 'GRAM',
+    name: 'Gradient Routing and Attentional Modulation',
+    acronym: 'GRAM',
+    companionKeywords: [
+      'gradient routing',
+      'attentional modulation',
+      'global workspace',
+      'global neuronal workspace',
+      'salience routing',
+      'workspace coordination',
+      'salience broadcast',
+    ],
+    weakKeywords: ['broadcast'],
+    landingZones: [
+      'plugin/core/observer.js',
+      'plugin/core/trace-normalizer.js',
+    ],
+    gradients: ['salience-broadcast', 'proposal-routing'],
+    defaultMutationTarget: 'implementation-task',
+    rationale: 'GRAM research should tighten observer salience scoring, gradient extraction, and proposal routing.',
+  },
+  {
+    id: 'LDT',
+    name: 'Layered Deliberation Thresholds',
+    acronym: 'LDT',
+    companionKeywords: [
+      'layered deliberation',
+      'decision threshold',
+      'confidence gate',
+      'deliberation threshold',
+      'escalation threshold',
+      'staged review',
+    ],
+    weakKeywords: ['gating'],
+    landingZones: [
+      'plugin/core/observer.js',
+      'plugin/core/data-store.js',
+      'plugin/core/promotion-applier.js',
+    ],
+    gradients: ['deliberation-thresholding', 'review-gating'],
+    defaultMutationTarget: 'runtime-config',
+    rationale: 'LDT belongs in queue thresholds, review gates, and staged promotion policies.',
+  },
+  {
+    id: 'PTRM',
+    name: 'Paper-to-Runtime Translation Model',
+    acronym: 'PTRM',
+    companionKeywords: [
+      'paper-to-runtime',
+      'research translation',
+      'translation model',
+      'implementation translation',
+      'runtime translation',
+      'traceable adoption',
+      'evidence-backed translation',
+    ],
+    landingZones: [
+      'plugin/monitors/arxiv-monitor.js',
+      'plugin/core/trace-normalizer.js',
+      'plugin/core/promotion-applier.js',
+    ],
+    gradients: ['research-translation', 'evidence-traceability'],
+    defaultMutationTarget: 'implementation-task',
+    rationale: 'PTRM should discipline how paper findings become explicit runtime or implementation follow-ups.',
+  },
+];
+
 function normalizeMessageTrace({ sessionId, sessionKey, message, source = 'context-engine' }) {
   const role = message?.role || message?.message?.role || 'unknown';
   const content = message?.content || message?.message?.content || '';
@@ -327,6 +396,7 @@ function buildResearchAssessment(trace) {
   const title = String(paper?.title || '').toLowerCase();
   const summary = String(paper?.summary || '').toLowerCase();
   const combined = `${title} ${summary}`;
+  const frameworkMatches = identifyResearchFrameworks(combined);
   const cognitiveScore = scoreKeywordHits(combined, [
     'global workspace',
     'global neuronal workspace',
@@ -347,8 +417,10 @@ function buildResearchAssessment(trace) {
     'agentic',
     'tool use',
   ]);
-  const novelty = clamp01(0.45 + (cognitiveScore * 0.08) + (implementationScore * 0.05));
-  const confidence = clamp01(0.5 + (cognitiveScore * 0.06) + (paper?.published ? 0.08 : 0));
+  const frameworkBonus = frameworkMatches.length * 0.06;
+  const novelty = clamp01(0.45 + (cognitiveScore * 0.08) + (implementationScore * 0.05) + frameworkBonus);
+  const confidence = clamp01(0.5 + (cognitiveScore * 0.06) + (paper?.published ? 0.08 : 0) + frameworkBonus);
+  const primaryFramework = frameworkMatches[0] || null;
   return {
     sourcePaper: {
       id: paper?.id || null,
@@ -356,23 +428,92 @@ function buildResearchAssessment(trace) {
       published: paper?.published || null,
       authors: Array.isArray(paper?.authors) ? paper.authors.slice(0, 5) : [],
     },
+    frameworks: frameworkMatches.map((framework) => framework.id),
+    primaryFramework: primaryFramework?.id || null,
+    landingZones: frameworkMatches.flatMap((framework) => framework.landingZones).filter(uniqueValue),
+    gradientTargets: frameworkMatches.flatMap((framework) => framework.gradients).filter(uniqueValue),
+    deliberationProfile: buildDeliberationProfile(frameworkMatches, combined),
     confidence: round2(confidence),
     novelty: round2(novelty),
-    expectedImpact: pickExpectedImpact(novelty, implementationScore, cognitiveScore),
-    suggestedMutationTarget: pickResearchTarget(combined, implementationScore, cognitiveScore),
+    expectedImpact: pickExpectedImpact(novelty, implementationScore, cognitiveScore, frameworkMatches),
+    suggestedMutationTarget: pickResearchTarget(combined, implementationScore, cognitiveScore, frameworkMatches),
+    rationale: buildResearchRationale(frameworkMatches, combined),
   };
 }
 
-function pickResearchTarget(text, implementationScore, cognitiveScore) {
+function identifyResearchFrameworks(text) {
+  const matches = [];
+  for (const framework of RESEARCH_FRAMEWORKS) {
+    const acronymHit = hasExactToken(text, framework.acronym);
+    const companionHits = scoreKeywordHits(text, framework.companionKeywords || []);
+    const weakHits = scoreKeywordHits(text, framework.weakKeywords || []);
+    const qualifies = companionHits >= 2 || (acronymHit && companionHits >= 1);
+    if (!qualifies) continue;
+    const hitCount = companionHits + weakHits + (acronymHit ? 1 : 0);
+    matches.push({
+      ...framework,
+      hitCount,
+    });
+  }
+  return matches.sort((left, right) => right.hitCount - left.hitCount);
+}
+
+function buildDeliberationProfile(frameworkMatches, text) {
+  const frameworkIds = frameworkMatches.map((framework) => framework.id);
+  if (frameworkIds.includes('LDT')) {
+    return {
+      mode: 'staged-threshold-review',
+      reviewBias: /safety|alignment|policy|governance/.test(text) ? 'conservative' : 'balanced',
+      autoEscalate: /failure|runtime|tool|timeout|error/.test(text),
+    };
+  }
+  if (frameworkIds.includes('PTRM')) {
+    return {
+      mode: 'translation-first',
+      reviewBias: 'evidence-backed',
+      autoEscalate: false,
+    };
+  }
+  if (frameworkIds.includes('GRAM')) {
+    return {
+      mode: 'salience-first',
+      reviewBias: 'implementation-forward',
+      autoEscalate: /benchmark|agent|architecture|tool use/.test(text),
+    };
+  }
+  return {
+    mode: 'general-research-review',
+    reviewBias: 'balanced',
+    autoEscalate: false,
+  };
+}
+
+function buildResearchRationale(frameworkMatches, text) {
+  if (frameworkMatches.length === 0) {
+    return 'Generic research-origin signal; hold in review until a human selects the downstream mutation target.';
+  }
+  const notes = frameworkMatches.map((framework) => framework.rationale);
+  if (hasSafetyGovernanceLanguage(text)) {
+    notes.push('The paper also carries governance or safety language, so it should stay on the explicit review path.');
+  }
+  return notes.join(' ');
+}
+
+function pickResearchTarget(text, implementationScore, cognitiveScore, frameworkMatches = []) {
+  const frameworkIds = frameworkMatches.map((framework) => framework.id);
+  if (hasSafetyGovernanceLanguage(text)) return 'AGENTS.md';
+  if (frameworkIds.includes('LDT')) return 'runtime-config';
+  if (frameworkIds.includes('GRAM')) return 'implementation-task';
+  if (frameworkIds.includes('PTRM')) return 'implementation-task';
   if (implementationScore >= 2 || cognitiveScore >= 3) return 'implementation-task';
-  if (/policy|safety|governance|alignment|constitutional/.test(text)) return 'AGENTS.md';
   if (/prompt|instruction|reasoning strategy|reflection/.test(text)) return 'AGENTS.md';
   if (/tool use|tools|instrumentation|workflow|orchestration/.test(text)) return 'TOOLS.md';
   if (/persona|personality|style|identity/.test(text)) return 'SOUL.md';
   return 'research-review';
 }
 
-function pickExpectedImpact(novelty, implementationScore, cognitiveScore) {
+function pickExpectedImpact(novelty, implementationScore, cognitiveScore, frameworkMatches = []) {
+  if (frameworkMatches.length >= 2) return 'high';
   if (novelty >= 0.8 || implementationScore >= 3) return 'high';
   if (novelty >= 0.6 || cognitiveScore >= 2) return 'medium';
   return 'low';
@@ -386,12 +527,30 @@ function scoreKeywordHits(text, keywords) {
   return score;
 }
 
+function hasExactToken(text, token) {
+  if (!token) return false;
+  const pattern = new RegExp(`\\b${escapeRegExp(String(token).toLowerCase())}\\b`);
+  return pattern.test(text);
+}
+
+function hasSafetyGovernanceLanguage(text) {
+  return /\b(safety|governance|alignment|constitutional)\b/.test(text);
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function clamp01(value) {
   return Math.max(0, Math.min(1, Number(value) || 0));
 }
 
 function round2(value) {
   return Math.round((Number(value) || 0) * 100) / 100;
+}
+
+function uniqueValue(value, index, collection) {
+  return collection.indexOf(value) === index;
 }
 
 function stableSummary(value) {
@@ -414,6 +573,7 @@ module.exports = {
   normalizeTurnTrace,
   normalizeHookTrace,
   buildPromotion,
+  identifyResearchFrameworks,
   collectToolStats,
   routePromotion,
 };
