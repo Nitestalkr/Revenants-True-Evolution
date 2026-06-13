@@ -13,7 +13,7 @@ Current cron-heavy setup causes:
 
 Revenants inherits the GNW/GRAO research loop, but not the cron execution model.
 The target architecture is plugin-native: OpenClaw gateway hooks, monitor events,
-trace normalization, agent-reviewed proposals, and LibraVDB-boundary promotion
+trace normalization, physics-gated proposals, and LibraVDB-boundary promotion
 signals. Cron-era materials are provenance and comparison evidence only.
 
 ### Layer 1: Continuous Data Collection (Plugin)
@@ -28,11 +28,13 @@ signals. Cron-era materials are provenance and comparison evidence only.
 **How:** Agent turns with pre-processed data from plugin
 **Benefit:** Model adds value to analysis, lean payloads (no raw trace parsing)
 
-### Layer 3: Agent Review and Coordination
+### Layer 3: Physics-Gated Promotion
 
 **What:** Advisory drive pressure, promotion proposals, handoff summaries
-**How:** Plugin queues distilled signals; agents review, decide, and implement
-**Benefit:** Deterministic evidence flow without autonomous policy mutation
+**How:** Plugin queues or applies distilled signals after pressure and
+conservation checks
+**Benefit:** Deterministic evidence flow with autonomous application bounded by
+explicit conservation rules
 
 ## Architecture Diagram
 
@@ -75,12 +77,15 @@ Replaces: Stability Monitor, Boredom Scan, ArXiv Monitor, Cron Health Monitor
 - **Legacy scheduler health monitor:** Tracks source-era scheduler failures only
   when needed for migration diagnostics. It is not part of the target loop.
 
-### Promotion Queue and Review
+### Promotion Queue and Autonomous Approval
 
 Replaces: GNW Phase 6 sync crons, cluster weight sync, automatic proposal
 delivery
 - Queues advisory drive pressure and promotion candidates
-- Agents review proposed changes before implementation
+- Applies pressure/conservation-passed candidates automatically when
+  `autonomousApprovals` is enabled
+- Leaves conservation-blocked candidates queued for inspection instead of
+  applying across boundaries
 - LibraVDB remains the memory/context authority
 - Deterministic evidence flow, no model dependency for raw collection
 
@@ -123,7 +128,7 @@ than spawn a separate subsystem:
   concrete landing zones.
 
 Research-origin proposals should surface these landing zones in queue metadata so
-agent review can decide whether a paper belongs in runtime config, an
+the physics gate can decide whether a paper belongs in runtime config, an
 implementation task, or supporting guidance.
 
 ### Phase 3: Integration
@@ -145,8 +150,8 @@ implementation task, or supporting guidance.
 - **No model crashes** from cron competition
 - **Output parity** with current cron-derived theory (or better)
 - **Token reduction** ≥ 60% on routine work
-- **No autonomous memory/policy mutation** outside agent review and LibraVDB
-  boundaries
+- **No autonomous memory/policy mutation** outside pressure, conservation, and
+  LibraVDB boundaries
 
 ---
 

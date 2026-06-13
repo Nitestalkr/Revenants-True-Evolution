@@ -8,6 +8,7 @@ function createPromotionApplier(ctx = {}) {
     store,
     mutationRoot,
     preparePromotion,
+    autoApprovePromotion,
     notifyQueuedPromotion,
     readNotificationSessionKey,
   } = ctx;
@@ -61,7 +62,10 @@ function createPromotionApplier(ctx = {}) {
         const followUp = prepared.promotion;
         store.appendPromotion(followUp);
         store.appendTrace(translationTrace);
-        if (typeof notifyQueuedPromotion === 'function') {
+        const autonomouslyApproved = typeof autoApprovePromotion === 'function'
+          ? autoApprovePromotion(followUp, translationTrace)
+          : false;
+        if (!autonomouslyApproved && typeof notifyQueuedPromotion === 'function') {
           void notifyQueuedPromotion(followUp, {
             sessionKey: typeof readNotificationSessionKey === 'function'
               ? readNotificationSessionKey(promotion.id)

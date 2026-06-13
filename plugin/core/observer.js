@@ -6,7 +6,7 @@ const MonitorSuite = require('../monitors/monitor-suite');
 const { normalizeHookTrace, buildPromotion, identifyResearchFrameworks } = require('./trace-normalizer');
 const { resolveRuntimeRoot } = require('./storage-paths');
 const { createPromotionApplier, classifyRuntimeHandling } = require('./promotion-applier');
-const { prepareEvolutionProposal } = require('./evolution-physics');
+const { prepareEvolutionProposal, isAutonomousApprovalsEnabled } = require('./evolution-physics');
 
 const DEFAULT_HOOKS = [
   'gateway_start',
@@ -58,6 +58,7 @@ class RevenantsObserver {
         state: this.store.readState(),
         pluginConfig: this.pluginConfig,
       }),
+      autoApprovePromotion: (promotion, trace) => this.maybeAutonomouslyApprovePromotion(promotion, trace),
       notifyQueuedPromotion: (promotion, trace) => this.notifyQueuedPromotion(promotion, trace),
       readNotificationSessionKey: (promotionId) => this.store.readState()?.notifications?.sentPromotions?.[promotionId]?.sessionKey || null,
     });
@@ -199,12 +200,18 @@ class RevenantsObserver {
     });
 
     if (promotion) {
-      void this.notifyQueuedPromotion(promotion, trace);
+      if (this.maybeAutonomouslyApprovePromotion(promotion, trace)) {
+        promotion = null;
+      } else {
+        void this.notifyQueuedPromotion(promotion, trace);
+      }
     }
 
     const autoWorkPromotion = this.maybeQueueAutoWork(trace, { queuedPromotion: promotion });
     if (autoWorkPromotion) {
-      void this.notifyQueuedPromotion(autoWorkPromotion, trace);
+      if (!this.maybeAutonomouslyApprovePromotion(autoWorkPromotion, trace)) {
+        void this.notifyQueuedPromotion(autoWorkPromotion, trace);
+      }
     }
   }
 
@@ -322,6 +329,20 @@ class RevenantsObserver {
       recent: recent.map(redactPromotion),
       recentlyReviewed: this.store.readReviewedPromotions(limit).map(redactPromotion),
     };
+  }
+
+  maybeAutonomouslyApprovePromotion(promotion, trace) {
+    if (!isAutonomousApprovalsEnabled(this.pluginConfig)) return false;
+    if (!promotion?.autoApplyEligible) return false;
+    if (promotion.applyMode === 'blocked' || promotion?.physics?.conservation?.passed === false) return false;
+
+    const result = this.reviewQueue('approve', {
+      ids: [promotion.id],
+      reviewer: 'revenants-autonomy',
+      note: `Autonomously approved after ${trace?.action || 'observer'} pressure/conservation gates passed.`,
+    });
+
+    return result.acknowledgedCount > 0;
   }
 
   async notifyQueuedPromotion(promotion, trace) {

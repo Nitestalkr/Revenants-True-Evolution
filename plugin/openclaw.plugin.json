@@ -55,6 +55,10 @@
         "type": "boolean",
         "description": "When a new proposal is queued, post a compact review prompt back into the active session chat."
       },
+      "autonomousApprovals": {
+        "type": "boolean",
+        "description": "When true, pressure/conservation-passed proposals are approved and applied automatically; conservation-blocked proposals stay queued."
+      },
       "proposalNotifyTimeoutMs": {
         "type": "integer",
         "minimum": 1000,

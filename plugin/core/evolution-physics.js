@@ -35,9 +35,13 @@ function evaluatePressure({ trace, promotion, state, pluginConfig } = {}) {
 
 function applyConservationLaw(promotion, { pluginConfig } = {}) {
   const allowedTargets = resolveAllowedTargets(pluginConfig);
+  const autonomousApprovals = isAutonomousApprovalsEnabled(pluginConfig);
   const next = {
     ...promotion,
-    validationRequired: uniqueStrings(promotion?.validationRequired || []),
+    validationRequired: filterHumanReview(
+      uniqueStrings(promotion?.validationRequired || []),
+      autonomousApprovals,
+    ),
     autoApplyEligible: promotion?.autoApplyEligible === true,
   };
   const violations = [];
@@ -52,15 +56,9 @@ function applyConservationLaw(promotion, { pluginConfig } = {}) {
     next.autoApplyEligible = false;
     next.validationRequired = uniqueStrings([
       ...next.validationRequired,
-      'human-review',
       'conservation-law',
     ]);
   }
-
-  next.validationRequired = uniqueStrings([
-    ...next.validationRequired,
-    'human-review',
-  ]);
 
   if (next.applyMode === 'config-patch' || next.mutationTarget === 'runtime-config') {
     next.validationRequired = uniqueStrings([
@@ -75,11 +73,14 @@ function applyConservationLaw(promotion, { pluginConfig } = {}) {
     || next.mutationTarget === 'AGENTS.md'
     || next.mutationTarget === 'SOUL.md'
   ) {
-    next.autoApplyEligible = false;
     next.validationRequired = uniqueStrings([
       ...next.validationRequired,
       'conservation-law',
     ]);
+  }
+
+  if (autonomousApprovals && violations.length === 0 && next.applyMode !== 'blocked') {
+    next.autoApplyEligible = true;
   }
 
   return {
@@ -159,6 +160,16 @@ function resolveAllowedTargets(pluginConfig = {}) {
   return new Set(configured.map((target) => String(target)));
 }
 
+function isAutonomousApprovalsEnabled(pluginConfig = {}) {
+  return pluginConfig?.autonomousApprovals === true
+    || pluginConfig?.evolution?.autonomousApprovals === true;
+}
+
+function filterHumanReview(values, autonomousApprovals) {
+  if (!autonomousApprovals) return values;
+  return values.filter((value) => value !== 'human-review');
+}
+
 function attachPhysics(promotion, patch) {
   return {
     ...promotion,
@@ -186,4 +197,5 @@ module.exports = {
   evaluatePressure,
   applyConservationLaw,
   prepareEvolutionProposal,
+  isAutonomousApprovalsEnabled,
 };

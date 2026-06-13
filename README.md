@@ -6,10 +6,10 @@ collection, monitor orchestration, and LibraVDB promotion signals.
 The project is moving cron-derived research away from a cron-heavy
 implementation and toward a plugin-first architecture:
 
-- The plugin observes, collects, normalizes, monitors, and queues signals.
+- The plugin observes, collects, normalizes, monitors, and promotes signals.
 - LibraVDB remains the memory/context authority.
-- Agent turns handle reasoning, review, proposals, implementation decisions,
-  and validation.
+- Agent turns handle reasoning, proposals, implementation decisions, and
+  validation.
 - Cron is treated as source-era scaffolding, not as the target runtime design.
 
 Revenants now treats research ingestion as a separate optional lane:
@@ -19,8 +19,10 @@ Revenants now treats research ingestion as a separate optional lane:
 - `research-evolution`: optional external research signals such as new arXiv
   papers that can become reviewable proposals
 
-Both lanes feed the same human-reviewed proposal path. Neither lane should
-apply changes silently.
+Both lanes feed the same physics-gated proposal path. When
+`autonomousApprovals` is enabled, proposals that pass pressure and conservation
+checks can apply without a human approval command; conservation-blocked
+proposals remain queued.
 
 Research-derived proposals can now carry explicit landing metadata for the
 current paper families under discussion:
@@ -72,5 +74,6 @@ The plugin currently exposes two OpenClaw-facing tools:
 
 - `revenants_status` for redacted observer/runtime state, recent traces, and
   queued promotions
-- `revenants_review_queue` for inspecting queue pressure and acknowledging
-  reviewed promotion signals without giving Revenants direct memory ownership
+- `revenants_review_queue` for inspecting queue pressure and manually
+  reviewing promotion signals when autonomous approval is disabled or a
+  conservation boundary blocks application
