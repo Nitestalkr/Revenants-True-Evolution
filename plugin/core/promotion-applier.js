@@ -176,13 +176,20 @@ function renderMutationEntry(promotion, appliedAt) {
     '',
     `## Mutation ${promotion.id}`,
     '',
-    `- Applied: ${appliedAt}`,
-    `- Intent: ${promotion.intent}`,
-    `- Type: ${promotion.proposalType}`,
-    `- Reason: ${promotion.summary}`,
   ];
-  if (promotion.mutationPlan?.summary) lines.push(`- Apply path: ${promotion.mutationPlan.summary}`);
+  const emittedLabels = new Set();
+  pushLabeledLine(lines, emittedLabels, 'Applied', appliedAt);
+  pushLabeledLine(lines, emittedLabels, 'Intent', promotion.intent);
+  pushLabeledLine(lines, emittedLabels, 'Type', promotion.proposalType);
+  pushLabeledLine(lines, emittedLabels, 'Reason', promotion.summary);
+  pushLabeledLine(lines, emittedLabels, 'Apply path', promotion.mutationPlan?.summary);
   return `${lines.join('\n')}\n`;
+}
+
+function pushLabeledLine(lines, emittedLabels, label, value) {
+  if (!value || emittedLabels.has(label)) return;
+  emittedLabels.add(label);
+  lines.push(`- ${label}: ${value}`);
 }
 
 function classifyRuntimeHandling(errorText, opts = {}) {

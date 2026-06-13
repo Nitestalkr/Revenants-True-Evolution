@@ -51,6 +51,11 @@ async function main() {
   assert.strictEqual(approveTooling.appliedMutations[0]?.status, 'applied');
   const toolsBody = fs.readFileSync(path.join(mutationRoot, 'TOOLS.md'), 'utf8');
   assert.ok(toolsBody.includes(toolingProposal.id), 'approved tooling proposal should append to TOOLS.md');
+  assert.strictEqual(
+    (toolsBody.match(/^- Intent:/gm) || []).length,
+    1,
+    'rendered mutation entry should include one Intent line',
+  );
 
   observer.recordHook('after_tool_call', {
     sessionId: 's-policy',
