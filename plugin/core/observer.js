@@ -52,6 +52,12 @@ class RevenantsObserver {
     this.promotionApplier = ctx.promotionApplier || createPromotionApplier({
       store: this.store,
       mutationRoot: this.mutationRoot,
+      preparePromotion: (promotion, trace) => prepareEvolutionProposal({
+        trace,
+        promotion,
+        state: this.store.readState(),
+        pluginConfig: this.pluginConfig,
+      }),
       notifyQueuedPromotion: (promotion, trace) => this.notifyQueuedPromotion(promotion, trace),
       readNotificationSessionKey: (promotionId) => this.store.readState()?.notifications?.sentPromotions?.[promotionId]?.sessionKey || null,
     });

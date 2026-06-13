@@ -7,6 +7,7 @@ function createPromotionApplier(ctx = {}) {
   const {
     store,
     mutationRoot,
+    preparePromotion,
     notifyQueuedPromotion,
     readNotificationSessionKey,
   } = ctx;
@@ -43,22 +44,23 @@ function createPromotionApplier(ctx = {}) {
       }
 
       if (promotion.proposalType === 'research' || promotion.applyMode === 'proposal-only') {
-        const followUp = createTranslatedResearchPromotion(promotion, appliedAt);
+        const candidateFollowUp = createTranslatedResearchPromotion(promotion, appliedAt);
+        const translationTrace = createResearchTranslationTrace(candidateFollowUp, promotion, appliedAt);
+        const prepared = typeof preparePromotion === 'function'
+          ? preparePromotion(candidateFollowUp, translationTrace)
+          : { queued: true, promotion: candidateFollowUp };
+        if (!prepared.queued) {
+          const record = {
+            ...baseRecord,
+            status: 'blocked',
+            details: `Research translation follow-up did not meet evolution pressure threshold (${prepared.reason || 'not queued'}).`,
+          };
+          store.appendAppliedMutation(record);
+          return record;
+        }
+        const followUp = prepared.promotion;
         store.appendPromotion(followUp);
-        store.appendTrace({
-          id: `${followUp.id}-trace`,
-          timestamp: appliedAt,
-          signalType: 'research',
-          source: 'revenants',
-          target: followUp.mutationTarget,
-          action: 'research_translation',
-          result: 'success',
-          impactScore: followUp.impactScore,
-          metadata: {
-            sourceProposalId: promotion.id,
-            suggestedMutationTarget: promotion?.researchAssessment?.suggestedMutationTarget || null,
-          },
-        });
+        store.appendTrace(translationTrace);
         if (typeof notifyQueuedPromotion === 'function') {
           void notifyQueuedPromotion(followUp, {
             sessionKey: typeof readNotificationSessionKey === 'function'
@@ -133,6 +135,23 @@ function createPromotionApplier(ctx = {}) {
       };
       store.appendAppliedMutation(record);
       return record;
+    },
+  };
+}
+
+function createResearchTranslationTrace(followUp, sourcePromotion, timestamp) {
+  return {
+    id: `${followUp.id}-trace`,
+    timestamp,
+    signalType: 'research',
+    source: 'revenants',
+    target: followUp.mutationTarget,
+    action: 'research_translation',
+    result: 'success',
+    impactScore: followUp.impactScore,
+    metadata: {
+      sourceProposalId: sourcePromotion.id,
+      suggestedMutationTarget: sourcePromotion?.researchAssessment?.suggestedMutationTarget || null,
     },
   };
 }
